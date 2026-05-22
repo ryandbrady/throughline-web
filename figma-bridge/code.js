@@ -95,6 +95,36 @@ async function exportNode(requestId, nodeId) {
   }
 }
 
+// --- Annotate a node -----------------------------------------------------
+// Write review feedback straight onto the node as a Dev Mode annotation.
+// The plugin is in the open file, so this always targets the right file —
+// no Figma file key, no REST comments API.
+
+async function annotateNode(requestId, nodeId, text) {
+  try {
+    const node = await figma.getNodeByIdAsync(nodeId);
+    if (!node || !('annotations' in node)) {
+      figma.ui.postMessage({
+        type: 'annotate-result',
+        requestId: requestId,
+        ok: false,
+        reason: 'cannot-annotate',
+      });
+      return;
+    }
+    // Append, so multiple pieces of feedback on one node are all kept.
+    node.annotations = node.annotations.concat([{ label: text }]);
+    figma.ui.postMessage({ type: 'annotate-result', requestId: requestId, ok: true });
+  } catch (e) {
+    figma.ui.postMessage({
+      type: 'annotate-result',
+      requestId: requestId,
+      ok: false,
+      reason: 'error',
+    });
+  }
+}
+
 // --- Wiring --------------------------------------------------------------
 
 figma.ui.onmessage = function (msg) {
@@ -104,6 +134,8 @@ figma.ui.onmessage = function (msg) {
     revealNode(msg.nodeId);
   } else if (msg.type === 'export') {
     exportNode(msg.requestId, msg.nodeId);
+  } else if (msg.type === 'annotate') {
+    annotateNode(msg.requestId, msg.nodeId, msg.text);
   }
 };
 

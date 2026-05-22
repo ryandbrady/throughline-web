@@ -91,6 +91,24 @@ function requestPluginImage(nodeId) {
   });
 }
 
+// Ask the plugin to write a Dev Mode annotation on the node. The plugin is in
+// the open file, so this always targets the right file — no Figma file key.
+const pendingAnnotations = new Map();
+let annotateSeq = 0;
+
+function requestPluginAnnotation(nodeId, text) {
+  if (countRole('plugin') === 0) return Promise.resolve(null);
+  return new Promise((resolve) => {
+    const requestId = 'ann' + ++annotateSeq;
+    const timer = setTimeout(() => {
+      pendingAnnotations.delete(requestId);
+      resolve(null);
+    }, 15000);
+    pendingAnnotations.set(requestId, { resolve, timer });
+    broadcast('plugin', { type: 'annotate-request', requestId, nodeId, text });
+  });
+}
+
 async function getNodeImage(nodeId) {
   const fromPlugin = await requestPluginImage(nodeId);
   if (fromPlugin) return { ok: true, url: fromPlugin };
@@ -160,11 +178,27 @@ app.get('/api/describe', async (req, res) => {
   res.json(result);
 });
 
-// Write-back: post a review comment to the Figma file, pinned to the node.
+// Write-back: leave review feedback on a node. The Bridge plugin annotates
+// the actually-open file (no file key needed); a REST comment is the fallback
+// only when no plugin is connected.
 app.post('/api/comment', async (req, res) => {
   const body = req.body || {};
-  const result = await postComment(resolveFileKey(), String(body.nodeId || ''), body.message);
-  res.json(result);
+  const nodeId = String(body.nodeId || '');
+  const message = typeof body.message === 'string' ? body.message.trim() : '';
+  if (!nodeId) return res.json({ ok: false, reason: 'no-node-id' });
+  if (!message) return res.json({ ok: false, reason: 'empty-message' });
+
+  const annotated = await requestPluginAnnotation(nodeId, message);
+  if (annotated) {
+    return res.json(
+      annotated.ok
+        ? { ok: true, via: 'annotation' }
+        : { ok: false, reason: annotated.reason || 'annotate-failed' }
+    );
+  }
+  // No plugin connected — fall back to a REST comment on FIGMA_FILE_KEY.
+  const result = await postComment(resolveFileKey(), nodeId, message);
+  res.json(Object.assign({ via: 'comment' }, result));
 });
 
 // WebSocket server in noServer mode — attached to the loopback HTTP servers
@@ -227,6 +261,17 @@ wss.on('connection', (socket) => {
           clearTimeout(pending.timer);
           pendingExports.delete(msg.requestId);
           pending.resolve(msg.ok ? msg.dataUrl : null);
+        }
+        break;
+      }
+
+      case 'annotate-result': {
+        // The plugin finished annotating a node — resolve the waiter.
+        const pending = pendingAnnotations.get(msg.requestId);
+        if (pending) {
+          clearTimeout(pending.timer);
+          pendingAnnotations.delete(msg.requestId);
+          pending.resolve(msg);
         }
         break;
       }

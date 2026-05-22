@@ -135,6 +135,13 @@
             toPlugin({ type: 'reveal', nodeId: msg.nodeId });
           } else if (msg.type === 'export-request') {
             toPlugin({ type: 'export', requestId: msg.requestId, nodeId: msg.nodeId });
+          } else if (msg.type === 'annotate-request') {
+            toPlugin({
+              type: 'annotate',
+              requestId: msg.requestId,
+              nodeId: msg.nodeId,
+              text: msg.text,
+            });
           }
         };
         ws.onclose = function () {
@@ -182,6 +189,17 @@
             reader.readAsDataURL(new Blob([msg.bytes], { type: 'image/png' }));
           } else {
             ws.send(JSON.stringify({ type: 'export-result', requestId: msg.requestId, ok: false }));
+          }
+        } else if (msg.type === 'annotate-result') {
+          if (ws && ws.readyState === 1) {
+            ws.send(
+              JSON.stringify({
+                type: 'annotate-result',
+                requestId: msg.requestId,
+                ok: msg.ok,
+                reason: msg.reason,
+              })
+            );
           }
         }
       };
