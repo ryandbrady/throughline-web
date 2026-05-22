@@ -1,8 +1,9 @@
 'use strict';
 
-// AI descriptions for Throughline Web — calls Claude with a node screenshot
-// (when one can be rendered) plus the design's structure, and returns a
-// description pitched at a screen reader user who cannot see the design.
+// AI descriptions for Throughline Web — a short Claude conversation per node.
+// The first call sends the node's screenshot + structure; "tell me more"
+// follow-ups continue that same conversation, so each builds on the last
+// instead of starting over.
 
 const Anthropic = require('@anthropic-ai/sdk');
 
@@ -19,8 +20,22 @@ function getClient(apiKey) {
   return clients.get(key);
 }
 
-// Descriptions are stable per node — cache them so repeat selections are free.
-const cache = new Map(); // `${nodeId}|${mode}|${topic}` -> description
+// One running conversation per node, so "tell me more" follow-ups build on the
+// description already given. Bounded so a long session can't grow unbounded.
+const conversations = new Map(); // nodeId -> messages[]
+const MAX_CONVERSATIONS = 25;
+
+function rememberConversation(nodeId, messages) {
+  conversations.delete(nodeId);
+  conversations.set(nodeId, messages);
+  while (conversations.size > MAX_CONVERSATIONS) {
+    conversations.delete(conversations.keys().next().value);
+  }
+}
+
+function hasConversation(nodeId) {
+  return conversations.has(nodeId);
+}
 
 // Stable system prompt — kept byte-identical across calls so it can cache.
 const SYSTEM_PROMPT = [
@@ -78,6 +93,7 @@ function outline(node, depth) {
   return lines;
 }
 
+// The opening message of a node's conversation.
 function buildRequestText(node, mode, topic, hasImage) {
   const kind =
     mode === 'topic'
@@ -98,30 +114,46 @@ function buildRequestText(node, mode, topic, hasImage) {
   ].join('\n');
 }
 
+// A "tell me more" follow-up turn — continues the same conversation.
+function buildTopicFollowup(topic) {
+  const kind = TOPIC_KINDS[topic];
+  return (
+    'Now give the ' +
+    kind +
+    ' description of this same item, following the ' +
+    kind +
+    ' instructions above. Build on what you already described — go deeper on ' +
+    'this angle, and do not repeat what you have already said.'
+  );
+}
+
 // node: an accessibility-tree node ({ id, name, role, children }).
 // mode: 'overview' | 'screen' | 'element' | 'topic'. topic: color|layout|imagery.
 // apiKey: the user's Anthropic key. imageBase64: a PNG screenshot or null —
-// the caller resolves it (via the Bridge plugin, else the Figma REST API).
+// only needed when starting a conversation (a follow-up reuses the first turn).
 async function describeNode({ node, mode, topic, apiKey, imageBase64 }) {
   const anthropic = getClient(apiKey);
   if (!anthropic) return { ok: false, reason: 'no-api-key' };
 
-  // Cache by image-presence too, so a structure-only result isn't reused once
-  // a screenshot becomes available (e.g. after the plugin connects).
-  const cacheKey =
-    node.id + '|' + mode + '|' + (topic || '') + '|' + (imageBase64 ? 'img' : 'noimg');
-  if (cache.has(cacheKey)) {
-    return { ok: true, mode, topic, description: cache.get(cacheKey), cached: true };
+  let messages;
+  if (mode === 'topic' && conversations.has(node.id)) {
+    // Continue this node's existing conversation — the screenshot and the
+    // earlier description are already in its history.
+    messages = conversations.get(node.id).slice();
+    messages.push({ role: 'user', content: buildTopicFollowup(topic) });
+  } else {
+    // Start a fresh conversation (a primary description, or a topic with no
+    // prior conversation — e.g. after a server restart).
+    const userContent = [];
+    if (imageBase64) {
+      userContent.push({
+        type: 'image',
+        source: { type: 'base64', media_type: 'image/png', data: imageBase64 },
+      });
+    }
+    userContent.push({ type: 'text', text: buildRequestText(node, mode, topic, !!imageBase64) });
+    messages = [{ role: 'user', content: userContent }];
   }
-
-  const userContent = [];
-  if (imageBase64) {
-    userContent.push({
-      type: 'image',
-      source: { type: 'base64', media_type: 'image/png', data: imageBase64 },
-    });
-  }
-  userContent.push({ type: 'text', text: buildRequestText(node, mode, topic, !!imageBase64) });
 
   try {
     const message = await anthropic.messages.create({
@@ -130,18 +162,27 @@ async function describeNode({ node, mode, topic, apiKey, imageBase64 }) {
       thinking: { type: 'adaptive' },
       output_config: { effort: 'medium' },
       system: [{ type: 'text', text: SYSTEM_PROMPT, cache_control: { type: 'ephemeral' } }],
-      messages: [{ role: 'user', content: userContent }],
+      messages: messages,
     });
     const textBlock = message.content.find((b) => b.type === 'text');
     const description = textBlock ? textBlock.text.trim() : '';
     if (!description) return { ok: false, reason: 'empty-response' };
-    cache.set(cacheKey, description);
-    return { ok: true, mode, topic, description, hadImage: !!imageBase64 };
+    // Persist the conversation so follow-ups can continue it. The full
+    // assistant content (thinking blocks included) must be kept verbatim.
+    messages.push({ role: 'assistant', content: message.content });
+    rememberConversation(node.id, messages);
+    return { ok: true, mode, topic, description };
   } catch (err) {
+    console.error(
+      '[describe] Claude call failed —',
+      'status=' + (err && err.status),
+      'name=' + (err && err.name),
+      'message=' + (err && err.message)
+    );
     if (err instanceof Anthropic.AuthenticationError) return { ok: false, reason: 'bad-api-key' };
     if (err instanceof Anthropic.RateLimitError) return { ok: false, reason: 'rate-limited' };
     return { ok: false, reason: 'api-error' };
   }
 }
 
-module.exports = { describeNode };
+module.exports = { describeNode, hasConversation };

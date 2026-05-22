@@ -17,7 +17,7 @@ const { WebSocketServer } = require('ws');
 
 const { buildA11yTree } = require('./build-a11y-tree');
 const { renderNodeImage } = require('./figma-images');
-const { describeNode } = require('./describe');
+const { describeNode, hasConversation } = require('./describe');
 const { postComment } = require('./figma-comments');
 
 const PORT = process.env.PORT || 4400;
@@ -168,12 +168,15 @@ app.get('/api/describe', async (req, res) => {
     ? 'screen'
     : 'element';
 
+  // A fresh description needs a screenshot resolved; a "tell me more" follow-up
+  // reuses the image already in its conversation, so skip the export then.
+  const needImage = !topic || !hasConversation(nodeId);
   const result = await describeNode({
     node: found.node,
     mode,
     topic,
     apiKey: req.get('x-anthropic-key') || '',
-    imageBase64: await nodeImageBase64(nodeId),
+    imageBase64: needImage ? await nodeImageBase64(nodeId) : null,
   });
   res.json(result);
 });
