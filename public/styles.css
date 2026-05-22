@@ -147,6 +147,144 @@ main {
   color: #b3261e;
 }
 
+/* --- AI description ----------------------------------------------------- */
+
+.ai-description {
+  margin: 0 0 12px;
+  min-height: 2.5em;
+}
+.ai-description p {
+  margin: 0;
+}
+.ai-msg {
+  color: var(--text-muted);
+  font-size: 0.9rem;
+}
+.ai-msg.error {
+  color: #b3261e;
+}
+.ai-text {
+  white-space: pre-wrap;
+}
+
+.ai-actions {
+  margin: 12px 0;
+}
+.ai-actions-label {
+  margin: 0 0 6px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+.ai-action-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.ai-action-buttons button {
+  width: auto;
+  flex: 1 1 auto;
+  padding: 6px 10px;
+  font-size: 0.8rem;
+  background: var(--badge-bg);
+  color: var(--text);
+}
+
+.comment-form {
+  margin-top: 12px;
+  border-top: 1px solid var(--border);
+  padding-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.comment-form label {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+.comment-form textarea {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 8px;
+  font: inherit;
+  font-size: 0.9rem;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  resize: vertical;
+}
+.comment-form textarea:focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: 1px;
+}
+.comment-status {
+  margin: 0;
+  font-size: 0.85rem;
+  min-height: 1.2em;
+}
+.comment-status[data-state="ok"] {
+  color: #1a7f37;
+}
+.comment-status[data-state="error"] {
+  color: #b3261e;
+}
+
+/* --- API key form ------------------------------------------------------- */
+
+.ai-key-form {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0 0 12px;
+}
+.ai-key-form label {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+.ai-key-form input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 8px;
+  font: inherit;
+  font-size: 0.9rem;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+.ai-key-form input:focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: 1px;
+}
+.ai-key-note {
+  margin: 0;
+  font-size: 0.78rem;
+  color: var(--text-muted);
+}
+.ai-key-buttons {
+  display: flex;
+  gap: 8px;
+}
+.ai-key-buttons button {
+  flex: 1;
+}
+button.secondary {
+  background: var(--badge-bg);
+  color: var(--text);
+}
+.ai-key-edit {
+  width: auto;
+  margin-top: 10px;
+  padding: 4px 0;
+  background: none;
+  color: var(--accent);
+  font-size: 0.8rem;
+  text-decoration: underline;
+}
+
 .panel {
   background: var(--bg-panel);
   border: 1px solid var(--border);

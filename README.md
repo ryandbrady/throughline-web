@@ -23,6 +23,12 @@ user, from an accessible space outside Figma's canvas UI.
 - **Live visual preview** — selecting an item renders that node as an image (via
   the Figma REST API) in a side panel, so the design sits next to its accessible
   structure.
+- **AI descriptions** — Claude describes the selected node for a screen reader
+  user from its screenshot and structure: a layout overview for pages, design
+  intent for screens, and on-demand descriptions plus "tell me more" deep dives
+  (colour, layout, imagery) for anything deeper.
+- **Comment write-back** — leave feedback on the selected node; it posts as a
+  comment pinned to that layer in the Figma file.
 
 ## Architecture
 
@@ -33,7 +39,9 @@ user, from an accessible space outside Figma's canvas UI.
 
 - `server/` — Express static host + WebSocket relay. `build-a11y-tree.js` turns
   raw Figma nodes into the accessibility tree; `figma-images.js` renders nodes
-  via the Figma REST API; `mock-design.js` lets the app run with zero setup.
+  via the Figma REST API; `describe.js` calls Claude for AI descriptions;
+  `figma-comments.js` posts write-back comments; `mock-design.js` lets the app
+  run with zero setup.
 - `public/` — the accessible web app (plain HTML/CSS/JS, no build step).
 - `figma-bridge/` — a companion Figma plugin. Its sandbox walks the document and
   drives canvas selection; its UI iframe owns the WebSocket.
@@ -125,20 +133,24 @@ preview panel just shows how to switch it on.
 **Setup**
 
 1. Create a Figma personal access token at
-   <https://www.figma.com/developers/api#access-tokens>. It needs only
-   **File content → Read-only** — no write scopes.
+   <https://www.figma.com/developers/api#access-tokens>. It needs
+   **File content → Read-only** for previews; add **Comments → Read and write**
+   if you want the comment write-back.
 2. Create your env file from the template:
 
    ```bash
    cp .env.example .env
    ```
 
-   Then fill in both values in `.env`:
+   Then fill in `.env`:
 
    ```ini
    FIGMA_TOKEN=figd_your_token_here
    FIGMA_FILE_KEY=your_file_key      # the ABC123 in figma.com/design/ABC123/...
    ```
+
+   (The Anthropic key for AI descriptions is *not* set here — the app prompts
+   for it in the browser. See *AI descriptions* below.)
 
 3. Restart the server (`npm start`) — `.env` is read once at startup.
 
@@ -150,6 +162,36 @@ plugin often cannot read `figma.fileKey`, and a fresh clone has no
 
 `.env` is git-ignored — never commit your token. If a preview reports
 "No Figma file key", `FIGMA_FILE_KEY` is unset.
+
+> **One file at a time.** Previews and the screenshots fed to AI descriptions
+> are rendered from `FIGMA_FILE_KEY`. If you switch the file open in Figma, set
+> `FIGMA_FILE_KEY` to the new file's key — otherwise the image won't match and
+> descriptions fall back to structure-only.
+
+## Optional: AI descriptions
+
+With an Anthropic API key, Claude describes the selected node for a screen
+reader user — from its screenshot (when one renders) and its structure.
+
+- **First use prompts for your Anthropic API key** in the AI panel and stores it
+  in your browser (`localStorage`) — no `.env` editing, no server restart. Get a
+  key at <https://console.claude.com/settings/keys>. Use *Update API key* to
+  change it. (Setting `ANTHROPIC_API_KEY` in `.env` also works, as a server-wide
+  default.)
+- Selecting a **page** or **top-level screen** describes it automatically — a
+  layout overview, since a screen reader user has no visual reference.
+- Deeper nodes have a **Describe with AI** button.
+- Once described, **tell me more** buttons request deep dives on colour,
+  layout, or imagery — the things hardest to perceive without sight.
+- The model defaults to `claude-opus-4-7`; override with `DESCRIBE_MODEL`.
+
+The key travels from your browser to your local server (which calls Claude — it
+needs the node screenshot the server renders). It is never committed.
+
+**Comment write-back.** The AI panel has a comment box — what you write posts
+as a comment pinned to that node in the Figma file. This needs the Figma token
+to carry the **Comments: write** scope (see the previews setup above); a
+read-only token returns a clear "needs the Comments scope" message.
 
 ## Where the design data comes from
 
@@ -186,15 +228,15 @@ Without it, the bundled mock design loads.
 Caveat: `get_metadata` returns structure only — node IDs, names, types,
 visibility — **not text content or fills**. So TEXT layers carry their Figma
 layer name, not their actual copy, and images aren't detected. The Bridge plugin
-reads real `characters`; a Claude pass can infer the rest.
+reads real `characters`; the AI descriptions fill in the rest from the
+screenshot.
 
 ## Not built yet (next passes)
 
-- **Claude-powered naming** — replace the heuristic in `synthesizeName()` with a
-  `claude-sonnet-4-6` call that writes meaningful names/alt text from layer
-  context and a screenshot. The `auto-named` flag already marks every spot that
-  needs it; the missing text content (above) is the main thing it would fix.
+- **Claude-written layer names** — AI *descriptions* exist; the per-layer
+  `name`/alt-text in the tree itself is still the heuristic from
+  `synthesizeName()`. A batch Claude pass could rewrite every `auto-named` node.
 - Figma REST API as a *tree-data* source too (it currently powers image
   previews only — adding it would let teammates navigate without plugin or MCP).
-- Comments/feedback written back to Figma from the accessible view.
+- Reliable file-key handling when the Bridge plugin switches files.
 - Multi-user sessions (the relay is currently single-room).

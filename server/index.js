@@ -1,10 +1,12 @@
 'use strict';
 
-// Throughline Web server — does three jobs:
+// Throughline Web server — does several jobs:
 //   1. Serves the accessible web app (public/).
 //   2. Acts as a WebSocket relay between the web app and the Figma Bridge
 //      plugin, so navigation in one drives the canvas in the other.
 //   3. Renders the selected node to a PNG via the Figma REST API (/api/image).
+//   4. Generates AI accessibility descriptions via Claude (/api/describe).
+//   5. Writes review comments back to the Figma file (/api/comment).
 
 require('dotenv').config();
 
@@ -15,10 +17,13 @@ const { WebSocketServer } = require('ws');
 
 const { buildA11yTree } = require('./build-a11y-tree');
 const { renderNodeImage } = require('./figma-images');
+const { describeNode } = require('./describe');
+const { postComment } = require('./figma-comments');
 
 const PORT = process.env.PORT || 4400;
 
 const app = express();
+app.use(express.json());
 app.use(express.static(path.join(__dirname, '..', 'public')));
 
 // Pick the starting design: a real Figma file imported via the MCP
@@ -48,14 +53,64 @@ console.log('Loaded ' + base.meta.source + ' design: ' + currentTree.title);
 
 app.get('/api/design', (_req, res) => res.json(currentTree));
 
-// Live visual preview: render a node to a PNG via the Figma REST API.
 // File key resolution: explicit env override, else the current design's key,
 // else the last good key we saw (real-design.js embeds one; the plugin may not).
+function resolveFileKey() {
+  return process.env.FIGMA_FILE_KEY || currentTree.fileKey || knownFileKey;
+}
+
+// Find a node in the current accessibility tree, tracking its depth
+// (1 = page, 2 = top-level screen, 3+ = nested element).
+function findNode(nodes, id, depth) {
+  for (const n of nodes) {
+    if (n.id === id) return { node: n, depth };
+    const found = findNode(n.children, id, depth + 1);
+    if (found) return found;
+  }
+  return null;
+}
+
+// Live visual preview: render a node to a PNG via the Figma REST API.
 app.get('/api/image', async (req, res) => {
   const nodeId = req.query.nodeId;
   if (!nodeId) return res.json({ ok: false, reason: 'no-node-id' });
-  const fileKey = process.env.FIGMA_FILE_KEY || currentTree.fileKey || knownFileKey;
-  const result = await renderNodeImage(String(nodeId), fileKey, req.query.scale);
+  const result = await renderNodeImage(String(nodeId), resolveFileKey(), req.query.scale);
+  res.json(result);
+});
+
+// AI accessibility description. The description's angle is chosen from the
+// node's depth — a page gets an overview, a screen gets design intent, a
+// nested node gets an element description. `topic` requests a deep dive.
+const TOPICS = ['color', 'layout', 'imagery'];
+app.get('/api/describe', async (req, res) => {
+  const nodeId = String(req.query.nodeId || '');
+  if (!nodeId) return res.json({ ok: false, reason: 'no-node-id' });
+  const found = findNode(currentTree.pages, nodeId, 1);
+  if (!found) return res.json({ ok: false, reason: 'unknown-node' });
+
+  const topic = TOPICS.includes(req.query.topic) ? req.query.topic : null;
+  const mode = topic
+    ? 'topic'
+    : found.depth === 1
+    ? 'overview'
+    : found.depth === 2
+    ? 'screen'
+    : 'element';
+
+  const result = await describeNode({
+    node: found.node,
+    fileKey: resolveFileKey(),
+    mode,
+    topic,
+    apiKey: req.get('x-anthropic-key') || '',
+  });
+  res.json(result);
+});
+
+// Write-back: post a review comment to the Figma file, pinned to the node.
+app.post('/api/comment', async (req, res) => {
+  const body = req.body || {};
+  const result = await postComment(resolveFileKey(), String(body.nodeId || ''), body.message);
   res.json(result);
 });
 
@@ -122,6 +177,8 @@ wss.on('connection', (socket) => {
   });
 });
 
-server.listen(PORT, () => {
-  console.log(`Throughline Web running at http://localhost:${PORT}`);
+// Bind to loopback only — the server is not reachable from other machines on
+// the network, so the Figma token and per-request API keys stay on this host.
+server.listen(PORT, '127.0.0.1', () => {
+  console.log(`Throughline Web running at http://localhost:${PORT} (localhost only)`);
 });

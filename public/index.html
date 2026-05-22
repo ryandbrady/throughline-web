@@ -43,6 +43,54 @@
           </div>
         </section>
 
+        <section class="panel ai-panel" aria-labelledby="ai-heading">
+          <h2 id="ai-heading">AI description</h2>
+          <div id="ai-description" class="ai-description">
+            <p class="ai-msg">Select an item for an AI description of what it is.</p>
+          </div>
+          <form id="ai-key-form" class="ai-key-form" hidden>
+            <label for="ai-key-input">Anthropic API key</label>
+            <input
+              id="ai-key-input"
+              type="password"
+              autocomplete="off"
+              spellcheck="false"
+              placeholder="sk-ant-..."
+            />
+            <p class="ai-key-note">
+              Stored only in this browser. Get a key at console.claude.com.
+            </p>
+            <div class="ai-key-buttons">
+              <button type="submit">Save key</button>
+              <button type="button" id="ai-key-cancel" class="secondary">Cancel</button>
+            </div>
+          </form>
+          <button id="describe-btn" type="button" hidden>Describe with AI</button>
+          <div id="ai-actions" class="ai-actions" hidden>
+            <p class="ai-actions-label">Tell me more about:</p>
+            <div class="ai-action-buttons">
+              <button type="button" data-topic="color">Color &amp; contrast</button>
+              <button type="button" data-topic="layout">Layout &amp; hierarchy</button>
+              <button type="button" data-topic="imagery">Imagery &amp; icons</button>
+            </div>
+          </div>
+          <form id="comment-form" class="comment-form">
+            <label for="comment-text">Comment on this item</label>
+            <textarea
+              id="comment-text"
+              rows="2"
+              placeholder="Leave feedback — it posts to the Figma file."
+            ></textarea>
+            <button type="submit" id="comment-btn" disabled>
+              Post comment to Figma
+            </button>
+            <p id="comment-status" class="comment-status" role="status"></p>
+          </form>
+          <button id="ai-key-edit" type="button" class="ai-key-edit" hidden>
+            Update API key
+          </button>
+        </section>
+
         <aside class="panel inspector" aria-labelledby="inspector-heading">
           <h2 id="inspector-heading">Selected item</h2>
           <dl id="inspector">

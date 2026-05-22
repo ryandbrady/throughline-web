@@ -10,6 +10,17 @@
   const announcer = document.getElementById('announcer');
   const revealBtn = document.getElementById('reveal-btn');
   const previewEl = document.getElementById('preview');
+  const aiDescEl = document.getElementById('ai-description');
+  const describeBtn = document.getElementById('describe-btn');
+  const aiActionsEl = document.getElementById('ai-actions');
+  const aiKeyForm = document.getElementById('ai-key-form');
+  const aiKeyInput = document.getElementById('ai-key-input');
+  const aiKeyCancel = document.getElementById('ai-key-cancel');
+  const aiKeyEdit = document.getElementById('ai-key-edit');
+  const commentForm = document.getElementById('comment-form');
+  const commentText = document.getElementById('comment-text');
+  const commentBtn = document.getElementById('comment-btn');
+  const commentStatus = document.getElementById('comment-status');
   const insp = {
     name: document.getElementById('insp-name'),
     role: document.getElementById('insp-role'),
@@ -21,7 +32,12 @@
   let bridgeConnected = false;
   let currentSource = 'mock'; // 'mock' | 'figma'
   let currentTitle = '';
+  let describeToken = 0; // guards against a stale AI response overwriting a newer
+  let pendingDescribe = null; // a describe request waiting on an API key
   let ws = null;
+
+  const KEY_STORAGE = 'throughline.anthropicKey';
+  const getStoredKey = () => localStorage.getItem(KEY_STORAGE) || '';
 
   // --- Announcements -----------------------------------------------------
   // Clearing first guarantees repeated identical messages are re-announced.
@@ -45,7 +61,10 @@
     li.dataset.name = node.name;
 
     const hasChildren = node.children && node.children.length > 0;
-    if (hasChildren) li.setAttribute('aria-expanded', 'true');
+    // Pages (level 1) open by default; deeper layers start collapsed, so a
+    // refresh or a new project always begins shallow — nothing is remembered.
+    const expanded = level <= 1;
+    if (hasChildren) li.setAttribute('aria-expanded', String(expanded));
 
     const row = document.createElement('span');
     row.className = 'row';
@@ -54,7 +73,7 @@
     const twisty = document.createElement('span');
     twisty.className = 'twisty';
     twisty.setAttribute('aria-hidden', 'true');
-    twisty.textContent = hasChildren ? '▾' : '';
+    twisty.textContent = hasChildren ? (expanded ? '▾' : '▸') : '';
 
     const label = document.createElement('span');
     label.className = 'label';
@@ -81,6 +100,7 @@
     if (hasChildren) {
       const group = document.createElement('ul');
       group.setAttribute('role', 'group');
+      group.hidden = !expanded;
       node.children.forEach((child, i) => {
         group.append(makeItem(child, level + 1, i + 1, node.children.length));
       });
@@ -120,6 +140,7 @@
     rowOf(li).setAttribute('tabindex', '0');
     currentItem = li;
     updateInspector(li);
+    resetAiPanel(li);
   }
 
   function focusItem(li) {
@@ -171,6 +192,7 @@
       .map((b) => b.textContent);
     insp.hint.textContent = badges.length ? badges.join(', ') : 'no notes';
     revealBtn.disabled = false;
+    commentBtn.disabled = false;
   }
 
   // --- Visual preview ----------------------------------------------------
@@ -234,7 +256,162 @@
       });
   }
 
-  // Activate = ask the Figma canvas to reveal this node, and preview it.
+  // --- AI description ----------------------------------------------------
+  // Pages and top-level screens describe themselves on activation (a screen
+  // reader user has no visual reference for layout). Deeper nodes wait for an
+  // explicit "Describe with AI" press.
+
+  function setAiMessage(text, isError) {
+    aiDescEl.innerHTML = '';
+    const p = document.createElement('p');
+    p.className = 'ai-msg' + (isError ? ' error' : '');
+    p.textContent = text;
+    aiDescEl.append(p);
+  }
+
+  // Called on every focus change — show the describe affordance, don't call AI.
+  function resetAiPanel(li) {
+    describeToken += 1; // cancel any in-flight description
+    aiActionsEl.hidden = true;
+    aiKeyForm.hidden = true;
+    describeBtn.hidden = false;
+    describeBtn.textContent = 'Describe “' + li.dataset.name + '” with AI';
+    setAiMessage('Press Describe — or Enter on a page or screen — for an AI description.');
+  }
+
+  function describeErrorText(reason) {
+    if (reason === 'rate-limited') return 'Rate limited — try again in a moment.';
+    return 'Description unavailable (' + reason + ').';
+  }
+
+  // --- Anthropic API key — prompted on first use, kept in this browser ----
+
+  function showKeyForm(wasRejected) {
+    aiKeyForm.hidden = false;
+    describeBtn.hidden = true;
+    aiActionsEl.hidden = true;
+    aiKeyInput.value = '';
+    setAiMessage(
+      wasRejected
+        ? 'That API key was rejected. Enter a valid Anthropic API key.'
+        : 'AI descriptions need your Anthropic API key — it stays in this browser.',
+      wasRejected
+    );
+    aiKeyInput.focus();
+  }
+
+  function updateKeyEditVisibility() {
+    aiKeyEdit.hidden = !getStoredKey();
+  }
+
+  aiKeyForm.addEventListener('submit', (event) => {
+    event.preventDefault();
+    const key = aiKeyInput.value.trim();
+    if (!key) return;
+    localStorage.setItem(KEY_STORAGE, key);
+    aiKeyForm.hidden = true;
+    updateKeyEditVisibility();
+    const next = pendingDescribe;
+    pendingDescribe = null;
+    if (next) loadDescription(next.nodeId, next.name, next.topic);
+  });
+
+  aiKeyCancel.addEventListener('click', () => {
+    aiKeyForm.hidden = true;
+    pendingDescribe = null;
+    if (currentItem) resetAiPanel(currentItem);
+  });
+
+  aiKeyEdit.addEventListener('click', () => showKeyForm(false));
+
+  function loadDescription(nodeId, name, topic) {
+    const key = getStoredKey();
+    if (!key) {
+      pendingDescribe = { nodeId: nodeId, name: name, topic: topic };
+      showKeyForm(false);
+      return;
+    }
+    const token = ++describeToken;
+    describeBtn.hidden = true;
+    aiKeyForm.hidden = true;
+    setAiMessage(topic ? 'Looking at ' + topic + '…' : 'Describing “' + name + '”…');
+    const url = '/api/describe?nodeId=' + encodeURIComponent(nodeId) + (topic ? '&topic=' + topic : '');
+    fetch(url, { headers: { 'X-Anthropic-Key': key } })
+      .then((r) => r.json())
+      .then((res) => {
+        if (token !== describeToken) return; // a newer selection has taken over
+        if (res.ok) {
+          aiDescEl.innerHTML = '';
+          const p = document.createElement('p');
+          p.className = 'ai-text';
+          p.textContent = res.description;
+          aiDescEl.append(p);
+          aiActionsEl.hidden = false;
+          announce('AI description of ' + name + '. ' + res.description);
+        } else if (res.reason === 'no-api-key' || res.reason === 'bad-api-key') {
+          if (res.reason === 'bad-api-key') localStorage.removeItem(KEY_STORAGE);
+          pendingDescribe = { nodeId: nodeId, name: name, topic: topic };
+          updateKeyEditVisibility();
+          showKeyForm(res.reason === 'bad-api-key');
+        } else {
+          setAiMessage(describeErrorText(res.reason), true);
+        }
+      })
+      .catch(() => {
+        if (token === describeToken) setAiMessage('Could not reach the server.', true);
+      });
+  }
+
+  // --- Comment write-back ------------------------------------------------
+
+  function commentStatusText(reason) {
+    if (reason === 'forbidden-scope') {
+      return 'Your Figma token needs the Comments: write scope.';
+    }
+    if (reason === 'no-token') return 'No Figma token configured.';
+    if (reason === 'no-file-key') return 'No Figma file key configured.';
+    if (reason === 'empty-message') return 'Write a comment first.';
+    return 'Comment failed (' + reason + ').';
+  }
+
+  function submitComment(event) {
+    event.preventDefault();
+    if (!currentItem) return;
+    const message = commentText.value.trim();
+    if (!message) {
+      setCommentStatus('Write a comment first.', 'error');
+      return;
+    }
+    commentBtn.disabled = true;
+    setCommentStatus('Posting…', '');
+    fetch('/api/comment', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ nodeId: currentItem.dataset.nodeId, message }),
+    })
+      .then((r) => r.json())
+      .then((res) => {
+        commentBtn.disabled = false;
+        if (res.ok) {
+          commentText.value = '';
+          setCommentStatus('Comment posted to Figma.', 'ok');
+        } else {
+          setCommentStatus(commentStatusText(res.reason), 'error');
+        }
+      })
+      .catch(() => {
+        commentBtn.disabled = false;
+        setCommentStatus('Could not reach the server.', 'error');
+      });
+  }
+
+  function setCommentStatus(text, state) {
+    commentStatus.textContent = text;
+    commentStatus.dataset.state = state;
+  }
+
+  // Activate = reveal on the Figma canvas, preview it, and (for pages and
+  // top-level screens) describe it.
   function activate(li) {
     treeEl
       .querySelectorAll('[aria-selected="true"]')
@@ -242,6 +419,9 @@
     li.setAttribute('aria-selected', 'true');
     const name = li.dataset.name;
     loadPreview(li.dataset.nodeId, name);
+    if (Number(li.getAttribute('aria-level') || 99) <= 2) {
+      loadDescription(li.dataset.nodeId, name, null);
+    }
     if (sendMessage({ type: 'focus', nodeId: li.dataset.nodeId })) {
       announce('Revealing ' + name + ' on the Figma canvas.');
     } else {
@@ -315,6 +495,20 @@
   revealBtn.addEventListener('click', () => {
     if (currentItem) activate(currentItem);
   });
+
+  describeBtn.addEventListener('click', () => {
+    if (currentItem) loadDescription(currentItem.dataset.nodeId, currentItem.dataset.name, null);
+  });
+
+  // "Tell me more" deep-dive buttons.
+  aiActionsEl.addEventListener('click', (event) => {
+    const topic = event.target.dataset && event.target.dataset.topic;
+    if (topic && currentItem) {
+      loadDescription(currentItem.dataset.nodeId, currentItem.dataset.name, topic);
+    }
+  });
+
+  commentForm.addEventListener('submit', submitComment);
 
   // --- WebSocket sync ----------------------------------------------------
 
@@ -412,6 +606,8 @@
   }
 
   // --- Boot --------------------------------------------------------------
+
+  updateKeyEditVisibility();
 
   fetch('/api/design')
     .then((r) => r.json())
