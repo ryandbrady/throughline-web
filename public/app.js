@@ -766,47 +766,87 @@
       .catch(() => null);
   }
 
+  // The AI descriptions as a readable Markdown document, in tree order.
+  function buildMarkdown(reviewedNodes) {
+    const lines = [
+      '# Throughline Web — accessibility review',
+      '',
+      '**Design:** ' + treeData.title,
+      '**Generated:** ' + new Date().toLocaleString(),
+      '**Reviewed:** ' + reviewedNodes.length + ' of ' + treeData.nodeCount + ' nodes',
+      '',
+    ];
+    if (!reviewedNodes.length) {
+      lines.push('_No nodes were described in this session._');
+    }
+    reviewedNodes.forEach((node) => {
+      lines.push('', '---', '', '## ' + node.name + ' (' + node.role + ')', '');
+      (descriptions.get(node.id) || []).forEach((e) => {
+        lines.push('### ' + e.label, '', e.text, '');
+      });
+    });
+    return lines.join('\n');
+  }
+
   async function buildArtifact() {
     if (!treeData) {
       announce('Nothing to download yet.');
       return;
     }
+    if (typeof JSZip === 'undefined') {
+      announce('Zip library failed to load.');
+      return;
+    }
     downloadBtn.disabled = true;
     downloadBtn.textContent = 'Building…';
     try {
-      // For every reviewed node, embed its screenshot + descriptions.
+      // Reviewed nodes — those with descriptions — in tree order.
+      const reviewedNodes = [];
+      (function walk(nodes) {
+        nodes.forEach((n) => {
+          const list = descriptions.get(n.id);
+          if (list && list.length) reviewedNodes.push(n);
+          if (n.children) walk(n.children);
+        });
+      })(treeData.pages || []);
+
+      // For every reviewed node, resolve its screenshot for the HTML viewer.
       const reviewed = {};
-      for (const id of descriptions.keys()) {
-        const list = descriptions.get(id) || [];
-        if (!list.length) continue;
-        const shot = await toDataUrl(imageCache.get(id) || (await fetchImageUrl(id)));
-        reviewed[id] = {
+      for (const node of reviewedNodes) {
+        const list = descriptions.get(node.id) || [];
+        const shot = await toDataUrl(imageCache.get(node.id) || (await fetchImageUrl(node.id)));
+        reviewed[node.id] = {
           screenshot: shot,
           descriptions: list.map((e) => ({ label: e.label, text: e.text })),
         };
       }
 
-      const data = {
-        generatedAt: new Date().toLocaleString(),
-        tree: treeData,
-        reviewed: reviewed,
-      };
+      // The interactive HTML viewer.
+      const data = { generatedAt: new Date().toLocaleString(), tree: treeData, reviewed: reviewed };
       const template = await fetch('session-template.html').then((r) => r.text());
       // Escape `<` so the embedded JSON cannot break out of the <script> tag.
       const json = JSON.stringify(data).replace(/</g, '\\u003c');
       const html = template.replace('{{DATA}}', () => json);
 
-      const blob = new Blob([html], { type: 'text/html' });
+      // Zip the interactive viewer together with the Markdown descriptions.
+      const zip = new JSZip();
+      zip.file('review.html', html);
+      zip.file('descriptions.md', buildMarkdown(reviewedNodes));
+      const blob = await zip.generateAsync({ type: 'blob' });
+
       const a = document.createElement('a');
       a.href = URL.createObjectURL(blob);
-      a.download = 'throughline-' + slug(treeData.title) + '-review.html';
+      a.download = 'throughline-' + slug(treeData.title) + '-review.zip';
       document.body.append(a);
       a.click();
       a.remove();
       setTimeout(() => URL.revokeObjectURL(a.href), 2000);
-      const n = Object.keys(reviewed).length;
       announce(
-        'Session review downloaded — ' + n + ' reviewed node' + (n === 1 ? '' : 's') + '.'
+        'Session review downloaded — ' +
+          reviewedNodes.length +
+          ' reviewed node' +
+          (reviewedNodes.length === 1 ? '' : 's') +
+          '.'
       );
     } catch (e) {
       announce('Could not build the session review.');

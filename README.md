@@ -29,9 +29,9 @@ user, from an accessible space outside Figma's canvas UI.
   (colour, layout, imagery) for anything deeper.
 - **Comment write-back** — leave feedback on the selected node; it posts as a
   comment pinned to that layer in the Figma file.
-- **Downloadable session artifact** — the *Download session* button exports the
-  whole review as one self-contained, interactive HTML file: the navigable tree,
-  screenshots, and AI descriptions, all embedded.
+- **Downloadable session artifact** — the *Download session* button exports a
+  `.zip`: a self-contained interactive HTML review (tree + screenshots + AI
+  descriptions) plus the descriptions as a Markdown document.
 
 ## Architecture
 
@@ -198,20 +198,19 @@ read-only token returns a clear "needs the Comments scope" message.
 
 ## Session artifact
 
-The **Download session** button (top-right) exports the review as **one
-self-contained HTML file** — assembled in the browser, no server involved. Open
-it anywhere, offline: it's a frozen, interactive copy of the review.
+The **Download session** button (top-right) exports a `.zip` — assembled in the
+browser, no server involved — containing two files:
 
-- The **page → layer tree**, fully navigable by keyboard, just like the app.
-- Each reviewed node is marked; selecting it shows its **screenshot and every AI
-  description**, all embedded inline — no external files.
-- The tree auto-expands along the paths to reviewed nodes so the content is easy
-  to find.
+- **`review.html`** — a self-contained, interactive copy of the review: the
+  page → layer tree fully navigable by keyboard, with each reviewed node's
+  screenshot and AI descriptions embedded inline. Opens anywhere, offline.
+- **`descriptions.md`** — the AI descriptions as a readable Markdown document,
+  one section per reviewed node.
 
-`public/session-template.html` is the viewer shell; the exporter fetches it and
-injects the session data. It covers the nodes you actually described —
-screenshots come from the Bridge plugin's exports, so the file is most complete
-with the plugin connected.
+In `review.html` the tree auto-expands along the paths to reviewed nodes.
+`public/session-template.html` is the viewer shell the exporter fills in. The
+artifact covers the nodes you actually described — screenshots come from the
+Bridge plugin's exports, so it's most complete with the plugin connected.
 
 ## Where the design data comes from
 
