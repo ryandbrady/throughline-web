@@ -504,15 +504,19 @@
     if (handled) event.preventDefault();
   });
 
-  // Clicking a row selects it; clicking the twisty toggles expansion.
+  // Mouse parity with the keyboard: clicking the twisty expands/collapses
+  // (like Right/Left); clicking anywhere else on a row focuses and activates
+  // it (like Enter) — revealing it on the canvas, previewing, describing.
   treeEl.addEventListener('click', (event) => {
     const li = event.target.closest('li[role="treeitem"]');
     if (!li) return;
-    if (event.target.classList.contains('twisty')) {
+    if (event.target.closest('.twisty')) {
+      focusItem(li);
       setExpanded(li, li.getAttribute('aria-expanded') !== 'true');
       return;
     }
     focusItem(li);
+    activate(li);
   });
 
   // Skip-link / programmatic focus on the container redirects to an item.
