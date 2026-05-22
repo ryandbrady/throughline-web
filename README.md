@@ -29,6 +29,9 @@ user, from an accessible space outside Figma's canvas UI.
   (colour, layout, imagery) for anything deeper.
 - **Comment write-back** — leave feedback on the selected node; it posts as a
   comment pinned to that layer in the Figma file.
+- **Downloadable session artifact** — the *Download session* button exports a
+  `.zip`: a self-contained interactive HTML review (tree + screenshots + AI
+  descriptions) plus the descriptions as a Markdown document.
 
 ## Architecture
 
@@ -192,6 +195,22 @@ needs the node screenshot the server renders). It is never committed.
 as a comment pinned to that node in the Figma file. This needs the Figma token
 to carry the **Comments: write** scope (see the previews setup above); a
 read-only token returns a clear "needs the Comments scope" message.
+
+## Session artifact
+
+The **Download session** button (top-right) exports a `.zip` — assembled in the
+browser, no server involved — containing two files:
+
+- **`review.html`** — a self-contained, interactive copy of the review: the
+  page → layer tree fully navigable by keyboard, with each reviewed node's
+  screenshot and AI descriptions embedded inline. Opens anywhere, offline.
+- **`descriptions.md`** — the AI descriptions as a readable Markdown document,
+  one section per reviewed node.
+
+In `review.html` the tree auto-expands along the paths to reviewed nodes.
+`public/session-template.html` is the viewer shell the exporter fills in. The
+artifact covers the nodes you actually described — screenshots come from the
+Bridge plugin's exports, so it's most complete with the plugin connected.
 
 ## Where the design data comes from
 

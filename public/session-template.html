@@ -1,0 +1,418 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Throughline review</title>
+    <style>
+      :root {
+        --bg: #ffffff;
+        --panel: #f5f6f8;
+        --text: #1a1d23;
+        --muted: #585e6b;
+        --border: #c7ccd6;
+        --rowhover: #e9ecf2;
+        --rowsel: #dbe4ff;
+        --accent: #2546d6;
+        --focus: #1d4ed8;
+        --badge: #e2e6ee;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --bg: #14171c;
+          --panel: #1e232b;
+          --text: #f1f3f6;
+          --muted: #a6adba;
+          --border: #3a414c;
+          --rowhover: #2a313b;
+          --rowsel: #2b3a6b;
+          --accent: #9db4ff;
+          --focus: #7fa0ff;
+          --badge: #313947;
+        }
+      }
+      * { box-sizing: border-box; }
+      [hidden] { display: none !important; }
+      body {
+        margin: 0;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        background: var(--bg);
+        color: var(--text);
+        line-height: 1.5;
+      }
+      .skip-link {
+        position: absolute;
+        left: 8px;
+        top: -48px;
+        padding: 8px 16px;
+        background: #2546d6;
+        color: #fff;
+        border-radius: 6px;
+        text-decoration: none;
+        z-index: 10;
+      }
+      .skip-link:focus { top: 8px; }
+      header {
+        padding: 18px 24px;
+        border-bottom: 1px solid var(--border);
+      }
+      header h1 { margin: 0; font-size: 1.3rem; }
+      header p { margin: 4px 0 0; color: var(--muted); font-size: 0.9rem; }
+      main {
+        display: grid;
+        grid-template-columns: 1fr 380px;
+        gap: 16px;
+        padding: 16px 24px;
+        align-items: start;
+      }
+      @media (max-width: 720px) {
+        main { grid-template-columns: 1fr; }
+      }
+      .panel {
+        background: var(--panel);
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        padding: 16px;
+      }
+      .panel h2 { margin: 0 0 10px; font-size: 1.05rem; }
+      .help { margin: 0 0 10px; font-size: 0.83rem; color: var(--muted); }
+
+      .tree ul { list-style: none; margin: 0; padding-left: 22px; }
+      .tree > ul { padding-left: 0; }
+      li[role="treeitem"] { margin: 1px 0; }
+      .row {
+        display: flex;
+        align-items: baseline;
+        gap: 8px;
+        padding: 5px 8px;
+        border-radius: 6px;
+        cursor: pointer;
+      }
+      .row:hover { background: var(--rowhover); }
+      li[role="treeitem"] > .row:focus-visible {
+        outline: 3px solid var(--focus);
+        outline-offset: 1px;
+      }
+      li[role="treeitem"][aria-selected="true"] > .row {
+        background: var(--rowsel);
+        font-weight: 600;
+      }
+      .twisty {
+        flex: none;
+        width: 20px;
+        align-self: stretch;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: var(--muted);
+        font-size: 0.7rem;
+      }
+      li[role="treeitem"]:not([aria-expanded]) > .row .twisty { visibility: hidden; }
+      .label { flex: 1 1 auto; }
+      .badge {
+        flex: none;
+        font-size: 0.68rem;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        padding: 2px 6px;
+        border-radius: 4px;
+        background: var(--badge);
+        color: var(--muted);
+      }
+      .badge.reviewed {
+        background: #2546d6;
+        color: #fff;
+      }
+
+      .detail-shot {
+        max-width: 100%;
+        height: auto;
+        display: block;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        margin-bottom: 14px;
+      }
+      .detail-meta { margin: 0 0 14px; color: var(--muted); font-size: 0.85rem; }
+      .desc-section { margin-bottom: 14px; }
+      .desc-section:last-child { margin-bottom: 0; }
+      .desc-label {
+        margin: 0 0 3px;
+        font-size: 0.72rem;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        color: var(--muted);
+      }
+      .desc-text { margin: 0; white-space: pre-wrap; }
+      .empty { color: var(--muted); }
+      .sr-only {
+        position: absolute;
+        width: 1px; height: 1px;
+        padding: 0; margin: -1px;
+        overflow: hidden; clip: rect(0 0 0 0);
+        white-space: nowrap; border: 0;
+      }
+    </style>
+  </head>
+  <body>
+    <a class="skip-link" href="#tree">Skip to design structure</a>
+
+    <header>
+      <h1 id="doc-title">Throughline review</h1>
+      <p id="doc-meta"></p>
+    </header>
+
+    <main>
+      <section class="panel" aria-labelledby="tree-heading">
+        <h2 id="tree-heading">Design structure</h2>
+        <p class="help">
+          Arrow keys move between items; Right/Left expand and collapse.
+          Items marked <strong>reviewed</strong> have an AI description.
+        </p>
+        <div id="tree" class="tree" role="tree" aria-labelledby="tree-heading" tabindex="-1"></div>
+      </section>
+
+      <aside class="panel" aria-labelledby="detail-heading">
+        <h2 id="detail-heading">Selected item</h2>
+        <div id="detail"><p class="empty">Select an item in the tree.</p></div>
+      </aside>
+    </main>
+
+    <div id="announcer" class="sr-only" aria-live="polite" aria-atomic="true"></div>
+
+    <script id="session-data" type="application/json">{{DATA}}</script>
+    <script>
+      (function () {
+        var treeEl = document.getElementById('tree');
+        var detailEl = document.getElementById('detail');
+        var announcer = document.getElementById('announcer');
+
+        var DATA = null;
+        try {
+          DATA = JSON.parse(document.getElementById('session-data').textContent);
+        } catch (e) {
+          DATA = null;
+        }
+
+        if (!DATA || !DATA.tree) {
+          treeEl.innerHTML = '<p class="empty">No session data in this file.</p>';
+          return;
+        }
+
+        var reviewed = DATA.reviewed || {};
+        document.getElementById('doc-title').textContent =
+          'Throughline review — ' + (DATA.tree.title || 'Untitled');
+        document.title = document.getElementById('doc-title').textContent;
+        var reviewedCount = Object.keys(reviewed).length;
+        document.getElementById('doc-meta').textContent =
+          'Generated ' + (DATA.generatedAt || '') + ' · ' + reviewedCount +
+          ' reviewed item' + (reviewedCount === 1 ? '' : 's');
+
+        var current = null;
+
+        function announce(msg) {
+          announcer.textContent = '';
+          setTimeout(function () { announcer.textContent = msg; }, 60);
+        }
+
+        // A node should open by default if its subtree contains a reviewed item.
+        function subtreeReviewed(node) {
+          if (reviewed[node.id]) return true;
+          return (node.children || []).some(subtreeReviewed);
+        }
+
+        function makeItem(node, level, pos, size) {
+          var li = document.createElement('li');
+          li.setAttribute('role', 'treeitem');
+          li.setAttribute('aria-level', String(level));
+          li.setAttribute('aria-posinset', String(pos));
+          li.setAttribute('aria-setsize', String(size));
+          li.setAttribute('aria-selected', 'false');
+          li.dataset.nodeId = node.id;
+
+          var kids = node.children || [];
+          var open = kids.some(subtreeReviewed);
+          if (kids.length) li.setAttribute('aria-expanded', String(open));
+
+          var row = document.createElement('span');
+          row.className = 'row';
+          row.setAttribute('tabindex', '-1');
+
+          var twisty = document.createElement('span');
+          twisty.className = 'twisty';
+          twisty.setAttribute('aria-hidden', 'true');
+          twisty.textContent = kids.length ? (open ? '▾' : '▸') : '';
+
+          var label = document.createElement('span');
+          label.className = 'label';
+          label.textContent = node.name;
+
+          var badge = document.createElement('span');
+          badge.className = 'badge';
+          badge.textContent = node.role;
+          row.append(twisty, label, badge);
+
+          if (reviewed[node.id]) {
+            var rev = document.createElement('span');
+            rev.className = 'badge reviewed';
+            rev.textContent = 'reviewed';
+            row.append(rev);
+          }
+          li.append(row);
+
+          if (kids.length) {
+            var group = document.createElement('ul');
+            group.setAttribute('role', 'group');
+            group.hidden = !open;
+            kids.forEach(function (c, i) {
+              group.append(makeItem(c, level + 1, i + 1, kids.length));
+            });
+            li.append(group);
+          }
+          return li;
+        }
+
+        function rowOf(li) { return li.firstElementChild; }
+
+        function setExpanded(li, open) {
+          if (!li.hasAttribute('aria-expanded')) return;
+          li.setAttribute('aria-expanded', String(open));
+          var last = li.lastElementChild;
+          if (last && last.tagName === 'UL') last.hidden = !open;
+          rowOf(li).querySelector('.twisty').textContent = open ? '▾' : '▸';
+        }
+
+        function visibleItems() {
+          return Array.prototype.filter.call(
+            treeEl.querySelectorAll('li[role="treeitem"]'),
+            function (li) {
+              var p = li.parentElement;
+              while (p && p !== treeEl) {
+                if (p.tagName === 'UL' && p.hidden) return false;
+                p = p.parentElement;
+              }
+              return true;
+            }
+          );
+        }
+
+        function focusItem(li) {
+          treeEl.querySelectorAll('.row').forEach(function (r) {
+            r.setAttribute('tabindex', '-1');
+          });
+          rowOf(li).setAttribute('tabindex', '0');
+          rowOf(li).focus();
+          select(li);
+        }
+
+        function select(li) {
+          treeEl.querySelectorAll('[aria-selected="true"]').forEach(function (x) {
+            x.setAttribute('aria-selected', 'false');
+          });
+          li.setAttribute('aria-selected', 'true');
+          current = li;
+          renderDetail(li);
+        }
+
+        function renderDetail(li) {
+          var id = li.dataset.nodeId;
+          var name = rowOf(li).querySelector('.label').textContent;
+          var role = rowOf(li).querySelector('.badge').textContent;
+          detailEl.innerHTML = '';
+
+          var h = document.createElement('p');
+          h.className = 'detail-meta';
+          h.textContent = name + ' — ' + role;
+          detailEl.append(h);
+
+          var entry = reviewed[id];
+          if (!entry) {
+            var none = document.createElement('p');
+            none.className = 'empty';
+            none.textContent = 'This item was not described in the session.';
+            detailEl.append(none);
+            return;
+          }
+          if (entry.screenshot) {
+            var img = document.createElement('img');
+            img.className = 'detail-shot';
+            img.src = entry.screenshot;
+            img.alt = 'Rendered design of ' + name;
+            detailEl.append(img);
+          }
+          (entry.descriptions || []).forEach(function (d) {
+            var sec = document.createElement('div');
+            sec.className = 'desc-section';
+            var l = document.createElement('p');
+            l.className = 'desc-label';
+            l.textContent = d.label;
+            var t = document.createElement('p');
+            t.className = 'desc-text';
+            t.textContent = d.text;
+            sec.append(l, t);
+            detailEl.append(sec);
+          });
+          announce('Showing ' + name + ', ' + (entry.descriptions || []).length + ' description(s).');
+        }
+
+        treeEl.addEventListener('keydown', function (event) {
+          var li = event.target.closest('li[role="treeitem"]');
+          if (!li) return;
+          var items = visibleItems();
+          var i = items.indexOf(li);
+          var handled = true;
+          switch (event.key) {
+            case 'ArrowDown': if (i < items.length - 1) focusItem(items[i + 1]); break;
+            case 'ArrowUp': if (i > 0) focusItem(items[i - 1]); break;
+            case 'ArrowRight':
+              if (li.getAttribute('aria-expanded') === 'false') setExpanded(li, true);
+              else if (li.lastElementChild && li.lastElementChild.tagName === 'UL') {
+                focusItem(li.lastElementChild.querySelector('li[role="treeitem"]'));
+              }
+              break;
+            case 'ArrowLeft':
+              if (li.getAttribute('aria-expanded') === 'true') setExpanded(li, false);
+              else {
+                var g = li.parentElement;
+                if (g && g.tagName === 'UL' && g.parentElement.getAttribute('role') === 'treeitem') {
+                  focusItem(g.parentElement);
+                }
+              }
+              break;
+            case 'Home': if (items.length) focusItem(items[0]); break;
+            case 'End': if (items.length) focusItem(items[items.length - 1]); break;
+            default: handled = false;
+          }
+          if (handled) event.preventDefault();
+        });
+
+        treeEl.addEventListener('click', function (event) {
+          var li = event.target.closest('li[role="treeitem"]');
+          if (!li) return;
+          if (event.target.closest('.twisty')) {
+            setExpanded(li, li.getAttribute('aria-expanded') !== 'true');
+            return;
+          }
+          focusItem(li);
+        });
+
+        treeEl.addEventListener('focus', function () {
+          if (current) rowOf(current).focus();
+        });
+
+        // Render
+        var root = document.createElement('ul');
+        root.setAttribute('role', 'group');
+        (DATA.tree.pages || []).forEach(function (page, i) {
+          root.append(makeItem(page, 1, i + 1, DATA.tree.pages.length));
+        });
+        treeEl.append(root);
+        var first = treeEl.querySelector('li[role="treeitem"]');
+        if (first) {
+          rowOf(first).setAttribute('tabindex', '0');
+          current = first;
+        }
+      })();
+    </script>
+  </body>
+</html>

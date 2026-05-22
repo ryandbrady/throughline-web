@@ -80,8 +80,20 @@ body {
 }
 
 .app-header {
+  position: relative;
   padding: 20px 24px;
   border-bottom: 1px solid var(--border);
+}
+.download-btn {
+  position: absolute;
+  top: 20px;
+  right: 24px;
+  width: auto;
+  padding: 9px 16px;
+  font-size: 0.9rem;
+}
+.download-btn:disabled {
+  opacity: 0.55;
 }
 .app-header h1 {
   margin: 0;
@@ -174,6 +186,23 @@ main {
 }
 .ai-text {
   white-space: pre-wrap;
+}
+
+/* Each generated description (primary, then any "tell me more" deep dives)
+   is its own stacked section so results accumulate rather than replace. */
+.ai-section {
+  margin-bottom: 14px;
+}
+.ai-section:last-child {
+  margin-bottom: 0;
+}
+.ai-section-label {
+  margin: 0 0 3px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
 }
 
 .ai-actions {

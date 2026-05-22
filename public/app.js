@@ -17,6 +17,7 @@
   const aiKeyInput = document.getElementById('ai-key-input');
   const aiKeyCancel = document.getElementById('ai-key-cancel');
   const aiKeyEdit = document.getElementById('ai-key-edit');
+  const downloadBtn = document.getElementById('download-btn');
   const commentForm = document.getElementById('comment-form');
   const commentText = document.getElementById('comment-text');
   const commentBtn = document.getElementById('comment-btn');
@@ -32,9 +33,15 @@
   let bridgeConnected = false;
   let currentSource = 'mock'; // 'mock' | 'figma'
   let currentTitle = '';
-  let describeToken = 0; // guards against a stale AI response overwriting a newer
   let pendingDescribe = null; // a describe request waiting on an API key
   let ws = null;
+
+  // Generated descriptions, cached per node — so they are not re-fetched, and
+  // so every "tell me more" result accumulates instead of replacing the last.
+  const descriptions = new Map(); // nodeId -> [{ kind, label, text }]
+  const describeInFlight = new Set(); // `${nodeId}|${kind}` currently generating
+  const imageCache = new Map(); // nodeId -> rendered image URL, for the artifact
+  let treeData = null; // the most recent /api/design tree, for the artifact
 
   const KEY_STORAGE = 'throughline.anthropicKey';
   const getStoredKey = () => localStorage.getItem(KEY_STORAGE) || '';
@@ -112,6 +119,12 @@
   function renderTree(tree) {
     currentSource = tree.source;
     currentTitle = tree.title;
+    treeData = tree;
+    // A new design means new node IDs — cached descriptions no longer apply.
+    descriptions.clear();
+    describeInFlight.clear();
+    imageCache.clear();
+    downloadBtn.disabled = false;
     treeEl.innerHTML = '';
     if (!tree.pages.length) {
       treeEl.innerHTML = '<p class="loading">This design has no visible pages.</p>';
@@ -246,8 +259,10 @@
       .then((r) => r.json())
       .then((res) => {
         if (token !== previewToken) return; // a newer selection has taken over
-        if (res.ok) showPreviewImage(res.url, name);
-        else setPreviewMessage(previewErrorText(res.reason), true);
+        if (res.ok) {
+          imageCache.set(nodeId, res.url); // keep it for the session artifact
+          showPreviewImage(res.url, name);
+        } else setPreviewMessage(previewErrorText(res.reason), true);
       })
       .catch(() => {
         if (token === previewToken) {
@@ -261,6 +276,15 @@
   // reader user has no visual reference for layout). Deeper nodes wait for an
   // explicit "Describe with AI" press.
 
+  const SECTION_LABELS = {
+    overview: 'Page overview',
+    screen: 'Screen',
+    element: 'Element',
+    color: 'Color & contrast',
+    layout: 'Layout & hierarchy',
+    imagery: 'Imagery & icons',
+  };
+
   function setAiMessage(text, isError) {
     aiDescEl.innerHTML = '';
     const p = document.createElement('p');
@@ -269,14 +293,39 @@
     aiDescEl.append(p);
   }
 
-  // Called on every focus change — show the describe affordance, don't call AI.
+  // Render every cached description for a node, stacked in generation order.
+  function renderDescriptions(nodeId) {
+    aiDescEl.innerHTML = '';
+    const list = descriptions.get(nodeId) || [];
+    list.forEach((entry) => {
+      const section = document.createElement('div');
+      section.className = 'ai-section';
+      const label = document.createElement('p');
+      label.className = 'ai-section-label';
+      label.textContent = entry.label;
+      const text = document.createElement('p');
+      text.className = 'ai-text';
+      text.textContent = entry.text;
+      section.append(label, text);
+      aiDescEl.append(section);
+    });
+  }
+
+  // Called on every focus change — show this node's cached descriptions if it
+  // has any, otherwise the describe affordance. Never calls the AI.
   function resetAiPanel(li) {
-    describeToken += 1; // cancel any in-flight description
-    aiActionsEl.hidden = true;
     aiKeyForm.hidden = true;
-    describeBtn.hidden = false;
-    describeBtn.textContent = 'Describe “' + li.dataset.name + '” with AI';
-    setAiMessage('Press Describe — or Enter on a page or screen — for an AI description.');
+    const list = descriptions.get(li.dataset.nodeId);
+    if (list && list.length) {
+      renderDescriptions(li.dataset.nodeId);
+      describeBtn.hidden = true;
+      aiActionsEl.hidden = false;
+    } else {
+      describeBtn.hidden = false;
+      describeBtn.textContent = 'Describe “' + li.dataset.name + '” with AI';
+      aiActionsEl.hidden = true;
+      setAiMessage('Press Describe — or Enter on a page or screen — for an AI description.');
+    }
   }
 
   function describeErrorText(reason) {
@@ -324,41 +373,86 @@
 
   aiKeyEdit.addEventListener('click', () => showKeyForm(false));
 
+  // Append an error line below whatever is already shown for the node.
+  function appendAiError(nodeId, text) {
+    renderDescriptions(nodeId);
+    const err = document.createElement('p');
+    err.className = 'ai-msg error';
+    err.textContent = text;
+    aiDescEl.append(err);
+  }
+
   function loadDescription(nodeId, name, topic) {
+    const kind = topic || 'primary';
+    const list = descriptions.get(nodeId) || [];
+    const cached = list.find((e) => e.kind === kind);
+    if (cached) {
+      // Already generated — show it from the cache, no Claude call.
+      renderDescriptions(nodeId);
+      aiActionsEl.hidden = false;
+      announce(cached.label + ' for ' + name + '. ' + cached.text);
+      return;
+    }
+
     const key = getStoredKey();
     if (!key) {
       pendingDescribe = { nodeId: nodeId, name: name, topic: topic };
       showKeyForm(false);
       return;
     }
-    const token = ++describeToken;
+
+    const flightKey = nodeId + '|' + kind;
+    if (describeInFlight.has(flightKey)) return; // already generating this one
+    describeInFlight.add(flightKey);
+
     describeBtn.hidden = true;
     aiKeyForm.hidden = true;
-    setAiMessage(topic ? 'Looking at ' + topic + '…' : 'Describing “' + name + '”…');
+    // Keep any existing descriptions on screen; add a pending line below them.
+    renderDescriptions(nodeId);
+    const pending = document.createElement('p');
+    pending.className = 'ai-msg';
+    pending.textContent = topic
+      ? 'Generating ' + (SECTION_LABELS[topic] || topic) + '…'
+      : 'Describing “' + name + '”…';
+    aiDescEl.append(pending);
+
     const url = '/api/describe?nodeId=' + encodeURIComponent(nodeId) + (topic ? '&topic=' + topic : '');
     fetch(url, { headers: { 'X-Anthropic-Key': key } })
       .then((r) => r.json())
       .then((res) => {
-        if (token !== describeToken) return; // a newer selection has taken over
+        describeInFlight.delete(flightKey);
+        const onNode = currentItem && currentItem.dataset.nodeId === nodeId;
         if (res.ok) {
-          aiDescEl.innerHTML = '';
-          const p = document.createElement('p');
-          p.className = 'ai-text';
-          p.textContent = res.description;
-          aiDescEl.append(p);
-          aiActionsEl.hidden = false;
-          announce('AI description of ' + name + '. ' + res.description);
+          // Cache the result (accumulating), then re-render if still on the node.
+          const target = descriptions.get(nodeId) || [];
+          if (!descriptions.has(nodeId)) descriptions.set(nodeId, target);
+          const entry = {
+            kind: kind,
+            label: SECTION_LABELS[topic || res.mode] || 'Description',
+            text: res.description,
+          };
+          const idx = target.findIndex((e) => e.kind === kind);
+          if (idx >= 0) target[idx] = entry;
+          else target.push(entry);
+          if (onNode) {
+            renderDescriptions(nodeId);
+            aiActionsEl.hidden = false;
+          }
+          announce(entry.label + ' for ' + name + '. ' + res.description);
         } else if (res.reason === 'no-api-key' || res.reason === 'bad-api-key') {
           if (res.reason === 'bad-api-key') localStorage.removeItem(KEY_STORAGE);
           pendingDescribe = { nodeId: nodeId, name: name, topic: topic };
           updateKeyEditVisibility();
-          showKeyForm(res.reason === 'bad-api-key');
-        } else {
-          setAiMessage(describeErrorText(res.reason), true);
+          if (onNode) showKeyForm(res.reason === 'bad-api-key');
+        } else if (onNode) {
+          appendAiError(nodeId, describeErrorText(res.reason));
         }
       })
       .catch(() => {
-        if (token === describeToken) setAiMessage('Could not reach the server.', true);
+        describeInFlight.delete(flightKey);
+        if (currentItem && currentItem.dataset.nodeId === nodeId) {
+          appendAiError(nodeId, 'Could not reach the server.');
+        }
       });
   }
 
@@ -658,6 +752,137 @@
 
     ws.addEventListener('error', () => ws.close());
   }
+
+  // --- Session artifact --------------------------------------------------
+  // Export the session as ONE self-contained, interactive HTML file: the
+  // navigable tree, the screenshots, and the AI descriptions, all embedded.
+
+  function slug(text) {
+    return (
+      String(text || 'session')
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-+|-+$/g, '') || 'session'
+    );
+  }
+
+  function fetchImageUrl(nodeId) {
+    return fetch('/api/image?nodeId=' + encodeURIComponent(nodeId))
+      .then((r) => r.json())
+      .then((res) => (res.ok ? res.url : null))
+      .catch(() => null);
+  }
+
+  // Normalise an image URL to an embeddable data URL (data URLs pass through;
+  // http URLs are fetched and read as a data URL).
+  function toDataUrl(url) {
+    if (!url) return Promise.resolve(null);
+    if (url.indexOf('data:') === 0) return Promise.resolve(url);
+    return fetch(url)
+      .then((r) => (r.ok ? r.blob() : null))
+      .then((blob) => {
+        if (!blob) return null;
+        return new Promise((resolve) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(String(reader.result));
+          reader.onerror = () => resolve(null);
+          reader.readAsDataURL(blob);
+        });
+      })
+      .catch(() => null);
+  }
+
+  // The AI descriptions as a readable Markdown document, in tree order.
+  function buildMarkdown(reviewedNodes) {
+    const lines = [
+      '# Throughline Web — accessibility review',
+      '',
+      '**Design:** ' + treeData.title,
+      '**Generated:** ' + new Date().toLocaleString(),
+      '**Reviewed:** ' + reviewedNodes.length + ' of ' + treeData.nodeCount + ' nodes',
+      '',
+    ];
+    if (!reviewedNodes.length) {
+      lines.push('_No nodes were described in this session._');
+    }
+    reviewedNodes.forEach((node) => {
+      lines.push('', '---', '', '## ' + node.name + ' (' + node.role + ')', '');
+      (descriptions.get(node.id) || []).forEach((e) => {
+        lines.push('### ' + e.label, '', e.text, '');
+      });
+    });
+    return lines.join('\n');
+  }
+
+  async function buildArtifact() {
+    if (!treeData) {
+      announce('Nothing to download yet.');
+      return;
+    }
+    if (typeof JSZip === 'undefined') {
+      announce('Zip library failed to load.');
+      return;
+    }
+    downloadBtn.disabled = true;
+    downloadBtn.textContent = 'Building…';
+    try {
+      // Reviewed nodes — those with descriptions — in tree order.
+      const reviewedNodes = [];
+      (function walk(nodes) {
+        nodes.forEach((n) => {
+          const list = descriptions.get(n.id);
+          if (list && list.length) reviewedNodes.push(n);
+          if (n.children) walk(n.children);
+        });
+      })(treeData.pages || []);
+
+      // For every reviewed node, resolve its screenshot for the HTML viewer.
+      const reviewed = {};
+      for (const node of reviewedNodes) {
+        const list = descriptions.get(node.id) || [];
+        const shot = await toDataUrl(imageCache.get(node.id) || (await fetchImageUrl(node.id)));
+        reviewed[node.id] = {
+          screenshot: shot,
+          descriptions: list.map((e) => ({ label: e.label, text: e.text })),
+        };
+      }
+
+      // The interactive HTML viewer.
+      const data = { generatedAt: new Date().toLocaleString(), tree: treeData, reviewed: reviewed };
+      const template = await fetch('session-template.html').then((r) => r.text());
+      // Escape `<` so the embedded JSON cannot break out of the <script> tag.
+      const json = JSON.stringify(data).replace(/</g, '\\u003c');
+      const html = template.replace('{{DATA}}', () => json);
+
+      // Zip the interactive viewer together with the Markdown descriptions.
+      const zip = new JSZip();
+      zip.file('review.html', html);
+      zip.file('descriptions.md', buildMarkdown(reviewedNodes));
+      const blob = await zip.generateAsync({ type: 'blob' });
+
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = 'throughline-' + slug(treeData.title) + '-review.zip';
+      document.body.append(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+      announce(
+        'Session review downloaded — ' +
+          reviewedNodes.length +
+          ' reviewed node' +
+          (reviewedNodes.length === 1 ? '' : 's') +
+          '.'
+      );
+    } catch (e) {
+      announce('Could not build the session review.');
+    } finally {
+      downloadBtn.disabled = false;
+      downloadBtn.textContent = 'Download session';
+    }
+  }
+
+  downloadBtn.addEventListener('click', buildArtifact);
 
   // --- Boot --------------------------------------------------------------
 
