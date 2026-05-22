@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <style>
+      body {
+        font: 12px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        margin: 0;
+        padding: 14px;
+        color: #1a1d23;
+      }
+      h2 {
+        margin: 0 0 8px;
+        font-size: 13px;
+      }
+      label {
+        display: block;
+        margin: 8px 0 4px;
+        font-weight: 600;
+      }
+      input {
+        width: 100%;
+        padding: 6px;
+        box-sizing: border-box;
+        border: 1px solid #c7ccd6;
+        border-radius: 5px;
+      }
+      .buttons {
+        display: flex;
+        gap: 8px;
+        margin-top: 10px;
+      }
+      button {
+        flex: 1;
+        padding: 7px;
+        font-weight: 600;
+        border: 0;
+        border-radius: 6px;
+        background: #2546d6;
+        color: #fff;
+        cursor: pointer;
+      }
+      button.secondary {
+        background: #e2e6ee;
+        color: #1a1d23;
+      }
+      #status {
+        margin: 8px 0 0;
+        font-weight: 600;
+      }
+      #status[data-ok="1"] {
+        color: #1a7f37;
+      }
+      #status[data-ok="0"] {
+        color: #b3261e;
+      }
+      #log {
+        margin: 6px 0 0;
+        color: #585e6b;
+        min-height: 1.4em;
+      }
+    </style>
+  </head>
+  <body>
+    <h2>Throughline Web Bridge</h2>
+    <p>Links this Figma file to the Throughline Web app.</p>
+
+    <label for="url">Server address</label>
+    <input id="url" value="ws://localhost:4400" />
+
+    <div class="buttons">
+      <button id="reconnect">Connect</button>
+      <button id="rescan" class="secondary">Rescan design</button>
+    </div>
+
+    <p id="status" data-ok="0">Not connected</p>
+    <p id="log"></p>
+
+    <script>
+      var statusEl = document.getElementById('status');
+      var logEl = document.getElementById('log');
+      var urlEl = document.getElementById('url');
+      var ws = null;
+
+      function setStatus(text, ok) {
+        statusEl.textContent = text;
+        statusEl.dataset.ok = ok ? '1' : '0';
+      }
+      function log(text) {
+        logEl.textContent = text;
+      }
+      function toPlugin(message) {
+        parent.postMessage({ pluginMessage: message }, '*');
+      }
+
+      function connect() {
+        if (ws) {
+          try {
+            ws.close();
+          } catch (e) {}
+        }
+        setStatus('Connecting…', false);
+        ws = new WebSocket(urlEl.value.trim());
+
+        ws.onopen = function () {
+          ws.send(JSON.stringify({ type: 'hello', role: 'plugin' }));
+          setStatus('Connected', true);
+          toPlugin({ type: 'request-document' }); // push the current design
+        };
+        ws.onmessage = function (event) {
+          var msg;
+          try {
+            msg = JSON.parse(event.data);
+          } catch (e) {
+            return;
+          }
+          if (msg.type === 'focus') {
+            toPlugin({ type: 'reveal', nodeId: msg.nodeId });
+          }
+        };
+        ws.onclose = function () {
+          setStatus('Disconnected', false);
+        };
+        ws.onerror = function () {
+          setStatus('Connection error — is the server running?', false);
+        };
+      }
+
+      // Messages coming back from the plugin sandbox (code.js).
+      window.onmessage = function (event) {
+        var msg = event.data.pluginMessage;
+        if (!msg) return;
+        if (msg.type === 'document') {
+          if (ws && ws.readyState === 1) {
+            ws.send(JSON.stringify({ type: 'document', document: msg.document }));
+            log('Sent design: ' + msg.document.children.length + ' page(s).');
+          }
+        } else if (msg.type === 'selection') {
+          if (ws && ws.readyState === 1) {
+            ws.send(JSON.stringify({ type: 'selection', nodeId: msg.nodeId }));
+          }
+          log('Canvas selected: ' + msg.name);
+        } else if (msg.type === 'reveal-result') {
+          log(msg.ok ? 'Revealed: ' + msg.name : 'Node not found on canvas.');
+        }
+      };
+
+      document.getElementById('reconnect').onclick = connect;
+      document.getElementById('rescan').onclick = function () {
+        toPlugin({ type: 'rescan' });
+      };
+
+      connect();
+    </script>
+  </body>
+</html>

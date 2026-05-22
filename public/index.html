@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Throughline Web — navigate a design</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <a class="skip-link" href="#tree">Skip to design structure</a>
+
+    <header class="app-header">
+      <h1>Throughline Web</h1>
+      <p class="tagline">Navigate a Figma design as an accessible structure.</p>
+      <p id="bridge-status" class="status" role="status">Connecting to server…</p>
+    </header>
+
+    <main>
+      <section class="panel tree-panel" aria-labelledby="tree-heading">
+        <h2 id="tree-heading">Design structure</h2>
+        <p id="tree-help" class="help">
+          Use the up and down arrow keys to move between items. Right arrow
+          expands a group, left arrow collapses it. Press Enter to reveal the
+          selected item on the Figma canvas.
+        </p>
+        <div
+          id="tree"
+          class="tree"
+          role="tree"
+          aria-labelledby="tree-heading"
+          aria-describedby="tree-help"
+          tabindex="-1"
+        >
+          <p class="loading">Loading design…</p>
+        </div>
+      </section>
+
+      <aside class="panel inspector" aria-labelledby="inspector-heading">
+        <h2 id="inspector-heading">Selected item</h2>
+        <dl id="inspector">
+          <div><dt>Name</dt><dd id="insp-name">Nothing selected</dd></div>
+          <div><dt>Role</dt><dd id="insp-role">—</dd></div>
+          <div><dt>Notes</dt><dd id="insp-hint">—</dd></div>
+          <div><dt>Figma node ID</dt><dd id="insp-id">—</dd></div>
+        </dl>
+        <button id="reveal-btn" type="button" disabled>
+          Reveal on Figma canvas
+        </button>
+      </aside>
+    </main>
+
+    <div id="announcer" class="sr-only" aria-live="polite" aria-atomic="true"></div>
+
+    <script src="app.js"></script>
+  </body>
+</html>

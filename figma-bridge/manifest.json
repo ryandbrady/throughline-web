@@ -1,0 +1,12 @@
+{
+  "name": "Throughline Web Bridge",
+  "id": "throughline-web-bridge",
+  "api": "1.0.0",
+  "main": "code.js",
+  "ui": "ui.html",
+  "editorType": ["figma"],
+  "networkAccess": {
+    "allowedDomains": ["*"],
+    "reasoning": "Dev scaffold: connects to the local Throughline Web server over WebSocket to sync the design structure and canvas selection. Restrict to the deployed host before publishing."
+  }
+}
