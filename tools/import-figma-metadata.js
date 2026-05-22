@@ -6,7 +6,10 @@
 // node IDs, names, types and the visible/hidden flag; this script reshapes
 // that into the lightweight raw-node tree build-a11y-tree.js consumes.
 //
-// Usage: node tools/import-figma-metadata.js <metadata.txt> [fileName]
+// Usage: node tools/import-figma-metadata.js <metadata.txt> [fileName] [fileKey]
+//
+// Passing the Figma file key embeds it in the output so live image previews
+// (the /api/image route) work without also setting FIGMA_FILE_KEY.
 //
 // Note: get_metadata does NOT include text content or fills, so TEXT nodes
 // carry only their layer name. Use the Figma Bridge plugin (or a Claude
@@ -105,10 +108,11 @@ function summarize(nodes, acc) {
 function main() {
   const inPath = process.argv[2];
   if (!inPath) {
-    console.error('Usage: node tools/import-figma-metadata.js <metadata.txt> [fileName]');
+    console.error('Usage: node tools/import-figma-metadata.js <metadata.txt> [fileName] [fileKey]');
     process.exit(1);
   }
   const fileName = process.argv[3] || 'Imported Figma file';
+  const fileKey = process.argv[4] || '';
 
   const raw = JSON.parse(fs.readFileSync(inPath, 'utf8'));
   // The dump is a [{type,text}] array; keep only the entries that are XML.
@@ -126,6 +130,7 @@ function main() {
     type: 'DOCUMENT',
     children: pages,
   };
+  if (fileKey) doc.fileKey = fileKey;
 
   const outPath = path.join(__dirname, '..', 'server', 'real-design.js');
   const banner =

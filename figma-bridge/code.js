@@ -36,6 +36,7 @@ function snapshotDocument() {
     id: figma.root.id,
     name: figma.root.name,
     type: 'DOCUMENT',
+    fileKey: figma.fileKey, // lets the web app render REST image previews
     children: figma.root.children.map(function (page) {
       return {
         id: page.id,

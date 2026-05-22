@@ -1,6 +1,7 @@
 node_modules/
 .DS_Store
 *.log
+.env
 
 # Snapshot of a real Figma file — generate locally with tools/import-figma-metadata.js
 server/real-design.js

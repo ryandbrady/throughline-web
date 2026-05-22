@@ -134,6 +134,8 @@ function buildA11yTree(document, meta = {}) {
   return {
     title: meta.title || (document && document.name) || 'Untitled design',
     source: meta.source || 'mock',
+    // File key for REST image rendering — may be absent (e.g. the mock design).
+    fileKey: meta.fileKey || (document && document.fileKey) || null,
     generatedAt: new Date().toISOString(),
     pageCount: pages.length,
     nodeCount: countNodes(pages),

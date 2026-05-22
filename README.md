@@ -20,6 +20,9 @@ user, from an accessible space outside Figma's canvas UI.
 - **Live two-way canvas sync** — activating an item in the web tree selects and
   zooms to it on the Figma canvas; selecting something on the canvas moves the
   web tree's focus to match.
+- **Live visual preview** — selecting an item renders that node as an image (via
+  the Figma REST API) in a side panel, so the design sits next to its accessible
+  structure.
 
 ## Architecture
 
@@ -29,8 +32,8 @@ user, from an accessible space outside Figma's canvas UI.
 ```
 
 - `server/` — Express static host + WebSocket relay. `build-a11y-tree.js` turns
-  raw Figma nodes into the accessibility tree; `mock-design.js` lets the app run
-  with zero setup.
+  raw Figma nodes into the accessibility tree; `figma-images.js` renders nodes
+  via the Figma REST API; `mock-design.js` lets the app run with zero setup.
 - `public/` — the accessible web app (plain HTML/CSS/JS, no build step).
 - `figma-bridge/` — a companion Figma plugin. Its sandbox walks the document and
   drives canvas selection; its UI iframe owns the WebSocket.
@@ -42,7 +45,8 @@ user, from an accessible space outside Figma's canvas UI.
 - **Git** — to clone the repo.
 - **Figma desktop app** — only needed for the optional live canvas sync (step 6).
 
-No API keys, accounts, or `.env` file are required.
+No API keys are needed to run the app. The optional **visual preview** feature
+needs a free Figma token — see *Visual previews* below.
 
 ## Run it — step by step
 
@@ -110,6 +114,41 @@ This makes the web app and the Figma canvas drive each other.
 If the plugin cannot connect, confirm `npm start` is running and that the
 server address in the plugin's UI field matches your port.
 
+## Optional: visual previews
+
+With a Figma token, selecting a node renders it as an image beside the tree
+(via the Figma REST API). Without a token the app still navigates fine — the
+preview panel just shows how to switch it on.
+
+**Setup**
+
+1. Create a Figma personal access token at
+   <https://www.figma.com/developers/api#access-tokens>. It needs only
+   **File content → Read-only** — no write scopes.
+2. Create your env file from the template:
+
+   ```bash
+   cp .env.example .env
+   ```
+
+   Then fill in both values in `.env`:
+
+   ```ini
+   FIGMA_TOKEN=figd_your_token_here
+   FIGMA_FILE_KEY=your_file_key      # the ABC123 in figma.com/design/ABC123/...
+   ```
+
+3. Restart the server (`npm start`) — `.env` is read once at startup.
+
+**About the file key.** Previews resolve it in this order: `FIGMA_FILE_KEY` →
+the key embedded in `server/real-design.js` → the key the Bridge plugin reports.
+**Set `FIGMA_FILE_KEY` explicitly** — it is the only reliable source: the Bridge
+plugin often cannot read `figma.fileKey`, and a fresh clone has no
+`real-design.js`. Use the key of whatever file you are reviewing.
+
+`.env` is git-ignored — never commit your token. If a preview reports
+"No Figma file key", `FIGMA_FILE_KEY` is unset.
+
 ## Where the design data comes from
 
 `build-a11y-tree.js` is the single "parser" — every source feeds the same raw
@@ -134,11 +173,13 @@ call it directly. Instead, Claude calls `get_metadata` for the file, and
 `tools/import-figma-metadata.js` reshapes that dump into `server/real-design.js`:
 
 ```bash
-node tools/import-figma-metadata.js <metadata-dump.txt> "My File Name"
+node tools/import-figma-metadata.js <metadata-dump.txt> "My File Name" <fileKey>
 ```
 
-`server/real-design.js` is git-ignored — run the importer to generate your own
-from any file you have MCP access to. Without it, the bundled mock design loads.
+The optional `<fileKey>` is embedded in the output so visual previews work
+without also setting `FIGMA_FILE_KEY`. `server/real-design.js` is git-ignored —
+run the importer to generate your own from any file you have MCP access to.
+Without it, the bundled mock design loads.
 
 Caveat: `get_metadata` returns structure only — node IDs, names, types,
 visibility — **not text content or fills**. So TEXT layers carry their Figma
@@ -151,6 +192,7 @@ reads real `characters`; a Claude pass can infer the rest.
   `claude-sonnet-4-6` call that writes meaningful names/alt text from layer
   context and a screenshot. The `auto-named` flag already marks every spot that
   needs it; the missing text content (above) is the main thing it would fix.
-- Figma REST API as a fourth data source (navigate without plugin or MCP).
+- Figma REST API as a *tree-data* source too (it currently powers image
+  previews only — adding it would let teammates navigate without plugin or MCP).
 - Comments/feedback written back to Figma from the accessible view.
 - Multi-user sessions (the relay is currently single-room).

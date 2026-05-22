@@ -9,6 +9,7 @@
   const statusEl = document.getElementById('bridge-status');
   const announcer = document.getElementById('announcer');
   const revealBtn = document.getElementById('reveal-btn');
+  const previewEl = document.getElementById('preview');
   const insp = {
     name: document.getElementById('insp-name'),
     role: document.getElementById('insp-role'),
@@ -172,13 +173,75 @@
     revealBtn.disabled = false;
   }
 
-  // Activate = ask the Figma canvas to reveal this node.
+  // --- Visual preview ----------------------------------------------------
+  // Renders the selected node via the server's /api/image route (Figma REST).
+
+  let previewToken = 0; // guards against an older request overwriting a newer
+
+  function setPreviewMessage(text, isError) {
+    previewEl.innerHTML = '';
+    const p = document.createElement('p');
+    p.className = 'preview-msg' + (isError ? ' error' : '');
+    p.textContent = text;
+    previewEl.append(p);
+  }
+
+  function showPreviewImage(url, name) {
+    previewEl.innerHTML = '';
+    const img = document.createElement('img');
+    img.alt = 'Rendered design of ' + name;
+    img.addEventListener('error', () =>
+      setPreviewMessage('The preview image could not be loaded — reselect to retry.', true)
+    );
+    img.src = url;
+    previewEl.append(img);
+  }
+
+  function previewErrorText(reason) {
+    if (reason === 'no-token') {
+      return 'Live preview needs a Figma token — set FIGMA_TOKEN in a .env file (see the README).';
+    }
+    if (reason === 'no-file-key') {
+      return 'No Figma file key for previews — set FIGMA_FILE_KEY in .env.';
+    }
+    if (reason === 'forbidden') {
+      return 'Figma rejected the token. Check it has file read access.';
+    }
+    if (reason === 'not-rendered') {
+      return 'Figma did not return an image for this layer.';
+    }
+    return 'Preview unavailable (' + reason + ').';
+  }
+
+  function loadPreview(nodeId, name) {
+    if (currentSource === 'mock') {
+      setPreviewMessage('Visual preview is available once a real Figma file is loaded.');
+      return;
+    }
+    const token = ++previewToken;
+    setPreviewMessage('Rendering “' + name + '”…');
+    fetch('/api/image?nodeId=' + encodeURIComponent(nodeId))
+      .then((r) => r.json())
+      .then((res) => {
+        if (token !== previewToken) return; // a newer selection has taken over
+        if (res.ok) showPreviewImage(res.url, name);
+        else setPreviewMessage(previewErrorText(res.reason), true);
+      })
+      .catch(() => {
+        if (token === previewToken) {
+          setPreviewMessage('Could not reach the server for a preview.', true);
+        }
+      });
+  }
+
+  // Activate = ask the Figma canvas to reveal this node, and preview it.
   function activate(li) {
     treeEl
       .querySelectorAll('[aria-selected="true"]')
       .forEach((x) => x.setAttribute('aria-selected', 'false'));
     li.setAttribute('aria-selected', 'true');
     const name = li.dataset.name;
+    loadPreview(li.dataset.nodeId, name);
     if (sendMessage({ type: 'focus', nodeId: li.dataset.nodeId })) {
       announce('Revealing ' + name + ' on the Figma canvas.');
     } else {
@@ -297,6 +360,7 @@
       .forEach((x) => x.setAttribute('aria-selected', 'false'));
     li.setAttribute('aria-selected', 'true');
     focusItem(li);
+    loadPreview(li.dataset.nodeId, li.dataset.name);
     announce('Canvas selected ' + li.dataset.name + '.');
   }
 

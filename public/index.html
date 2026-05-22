@@ -35,18 +35,27 @@
         </div>
       </section>
 
-      <aside class="panel inspector" aria-labelledby="inspector-heading">
-        <h2 id="inspector-heading">Selected item</h2>
-        <dl id="inspector">
-          <div><dt>Name</dt><dd id="insp-name">Nothing selected</dd></div>
-          <div><dt>Role</dt><dd id="insp-role">—</dd></div>
-          <div><dt>Notes</dt><dd id="insp-hint">—</dd></div>
-          <div><dt>Figma node ID</dt><dd id="insp-id">—</dd></div>
-        </dl>
-        <button id="reveal-btn" type="button" disabled>
-          Reveal on Figma canvas
-        </button>
-      </aside>
+      <div class="side-column">
+        <section class="panel preview-panel" aria-labelledby="preview-heading">
+          <h2 id="preview-heading">Visual preview</h2>
+          <div id="preview" class="preview">
+            <p class="preview-msg">Select an item in the tree to see its design.</p>
+          </div>
+        </section>
+
+        <aside class="panel inspector" aria-labelledby="inspector-heading">
+          <h2 id="inspector-heading">Selected item</h2>
+          <dl id="inspector">
+            <div><dt>Name</dt><dd id="insp-name">Nothing selected</dd></div>
+            <div><dt>Role</dt><dd id="insp-role">—</dd></div>
+            <div><dt>Notes</dt><dd id="insp-hint">—</dd></div>
+            <div><dt>Figma node ID</dt><dd id="insp-id">—</dd></div>
+          </dl>
+          <button id="reveal-btn" type="button" disabled>
+            Reveal on Figma canvas
+          </button>
+        </aside>
+      </div>
     </main>
 
     <div id="announcer" class="sr-only" aria-live="polite" aria-atomic="true"></div>
