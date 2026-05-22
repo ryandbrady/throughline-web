@@ -17,6 +17,7 @@
   const aiKeyInput = document.getElementById('ai-key-input');
   const aiKeyCancel = document.getElementById('ai-key-cancel');
   const aiKeyEdit = document.getElementById('ai-key-edit');
+  const downloadBtn = document.getElementById('download-btn');
   const commentForm = document.getElementById('comment-form');
   const commentText = document.getElementById('comment-text');
   const commentBtn = document.getElementById('comment-btn');
@@ -39,6 +40,8 @@
   // so every "tell me more" result accumulates instead of replacing the last.
   const descriptions = new Map(); // nodeId -> [{ kind, label, text }]
   const describeInFlight = new Set(); // `${nodeId}|${kind}` currently generating
+  const imageCache = new Map(); // nodeId -> rendered image URL, for the artifact
+  let treeData = null; // the most recent /api/design tree, for the artifact
 
   const KEY_STORAGE = 'throughline.anthropicKey';
   const getStoredKey = () => localStorage.getItem(KEY_STORAGE) || '';
@@ -116,9 +119,12 @@
   function renderTree(tree) {
     currentSource = tree.source;
     currentTitle = tree.title;
+    treeData = tree;
     // A new design means new node IDs — cached descriptions no longer apply.
     descriptions.clear();
     describeInFlight.clear();
+    imageCache.clear();
+    downloadBtn.disabled = false;
     treeEl.innerHTML = '';
     if (!tree.pages.length) {
       treeEl.innerHTML = '<p class="loading">This design has no visible pages.</p>';
@@ -253,8 +259,10 @@
       .then((r) => r.json())
       .then((res) => {
         if (token !== previewToken) return; // a newer selection has taken over
-        if (res.ok) showPreviewImage(res.url, name);
-        else setPreviewMessage(previewErrorText(res.reason), true);
+        if (res.ok) {
+          imageCache.set(nodeId, res.url); // keep it for the session artifact
+          showPreviewImage(res.url, name);
+        } else setPreviewMessage(previewErrorText(res.reason), true);
       })
       .catch(() => {
         if (token === previewToken) {
@@ -718,6 +726,165 @@
 
     ws.addEventListener('error', () => ws.close());
   }
+
+  // --- Session artifact --------------------------------------------------
+  // Bundle the reviewed nodes — screenshots, descriptions, the tree — into a
+  // downloadable .zip, assembled entirely in the browser.
+
+  function slug(text) {
+    return (
+      String(text || 'session')
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-+|-+$/g, '') || 'session'
+    );
+  }
+
+  function fetchImageUrl(nodeId) {
+    return fetch('/api/image?nodeId=' + encodeURIComponent(nodeId))
+      .then((r) => r.json())
+      .then((res) => (res.ok ? res.url : null))
+      .catch(() => null);
+  }
+
+  // Resolve an image URL (data URL or http) to raw base64 PNG data.
+  function imageToBase64(url) {
+    if (!url) return Promise.resolve(null);
+    if (url.indexOf('data:') === 0) {
+      const comma = url.indexOf(',');
+      return Promise.resolve(comma >= 0 ? url.slice(comma + 1) : null);
+    }
+    return fetch(url)
+      .then((r) => (r.ok ? r.blob() : null))
+      .then((blob) => {
+        if (!blob) return null;
+        return new Promise((resolve) => {
+          const reader = new FileReader();
+          reader.onload = () => {
+            const result = String(reader.result);
+            const comma = result.indexOf(',');
+            resolve(comma >= 0 ? result.slice(comma + 1) : null);
+          };
+          reader.onerror = () => resolve(null);
+          reader.readAsDataURL(blob);
+        });
+      })
+      .catch(() => null);
+  }
+
+  function treeOutlineMd(nodes, depth) {
+    let lines = [];
+    nodes.forEach((n) => {
+      lines.push('  '.repeat(depth) + '- ' + n.name + ' (' + n.role + ')');
+      if (n.children && n.children.length) {
+        lines = lines.concat(treeOutlineMd(n.children, depth + 1));
+      }
+    });
+    return lines;
+  }
+
+  async function buildArtifact() {
+    if (!treeData || typeof JSZip === 'undefined') {
+      announce('Nothing to download yet.');
+      return;
+    }
+    downloadBtn.disabled = true;
+    downloadBtn.textContent = 'Building…';
+    try {
+      const zip = new JSZip();
+      zip.file('tree.json', JSON.stringify(treeData, null, 2));
+
+      // Reviewed nodes — those with descriptions — in tree order.
+      const reviewed = [];
+      (function walk(nodes) {
+        nodes.forEach((n) => {
+          const list = descriptions.get(n.id);
+          if (list && list.length) reviewed.push(n);
+          if (n.children) walk(n.children);
+        });
+      })(treeData.pages || []);
+
+      const shots = zip.folder('screenshots');
+      const descData = {
+        title: treeData.title,
+        generatedAt: new Date().toISOString(),
+        reviewedCount: reviewed.length,
+        nodes: [],
+      };
+      const sections = [];
+
+      for (const node of reviewed) {
+        const list = descriptions.get(node.id) || [];
+        const safeId = node.id.replace(/[^\w.-]/g, '-');
+        const base64 = await imageToBase64(imageCache.get(node.id) || (await fetchImageUrl(node.id)));
+        let shotRef = null;
+        if (base64) {
+          shotRef = 'screenshots/' + safeId + '.png';
+          shots.file(safeId + '.png', base64, { base64: true });
+        }
+        descData.nodes.push({
+          id: node.id,
+          name: node.name,
+          role: node.role,
+          screenshot: shotRef,
+          descriptions: list.map((e) => ({ kind: e.kind, label: e.label, text: e.text })),
+        });
+        let section = '## ' + node.name + ' (' + node.role + ')\n';
+        if (shotRef) section += '\n![' + node.name.replace(/[[\]]/g, '') + '](' + shotRef + ')\n';
+        list.forEach((e) => {
+          section += '\n**' + e.label + '**\n\n' + e.text + '\n';
+        });
+        sections.push(section);
+      }
+
+      zip.file('descriptions.json', JSON.stringify(descData, null, 2));
+
+      const md = [
+        '# Throughline Web — accessibility review',
+        '',
+        '**Design:** ' + treeData.title,
+        '**Generated:** ' + new Date().toLocaleString(),
+        '**Reviewed:** ' + reviewed.length + ' of ' + treeData.nodeCount + ' nodes',
+        '',
+        '---',
+        '',
+        '# Reviewed nodes',
+        '',
+        reviewed.length ? sections.join('\n') : '_No nodes were described in this session._',
+        '',
+        '---',
+        '',
+        '# Design structure',
+        '',
+        treeOutlineMd(treeData.pages || [], 0).join('\n'),
+        '',
+      ].join('\n');
+      zip.file('report.md', md);
+
+      const blob = await zip.generateAsync({ type: 'blob' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = 'throughline-' + slug(treeData.title) + '.zip';
+      document.body.append(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+      announce(
+        'Session artifact downloaded — ' +
+          reviewed.length +
+          ' reviewed node' +
+          (reviewed.length === 1 ? '' : 's') +
+          '.'
+      );
+    } catch (e) {
+      announce('Could not build the session artifact.');
+    } finally {
+      downloadBtn.disabled = false;
+      downloadBtn.textContent = 'Download session';
+    }
+  }
+
+  downloadBtn.addEventListener('click', buildArtifact);
 
   // --- Boot --------------------------------------------------------------
 

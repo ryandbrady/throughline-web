@@ -80,8 +80,20 @@ body {
 }
 
 .app-header {
+  position: relative;
   padding: 20px 24px;
   border-bottom: 1px solid var(--border);
+}
+.download-btn {
+  position: absolute;
+  top: 20px;
+  right: 24px;
+  width: auto;
+  padding: 9px 16px;
+  font-size: 0.9rem;
+}
+.download-btn:disabled {
+  opacity: 0.55;
 }
 .app-header h1 {
   margin: 0;

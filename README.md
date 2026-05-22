@@ -29,6 +29,9 @@ user, from an accessible space outside Figma's canvas UI.
   (colour, layout, imagery) for anything deeper.
 - **Comment write-back** — leave feedback on the selected node; it posts as a
   comment pinned to that layer in the Figma file.
+- **Downloadable session artifact** — the *Download session* button bundles the
+  reviewed nodes (screenshots, AI descriptions, the accessibility tree) into a
+  `.zip` with a readable `report.md`.
 
 ## Architecture
 
@@ -192,6 +195,21 @@ needs the node screenshot the server renders). It is never committed.
 as a comment pinned to that node in the Figma file. This needs the Figma token
 to carry the **Comments: write** scope (see the previews setup above); a
 read-only token returns a clear "needs the Comments scope" message.
+
+## Session artifact
+
+The **Download session** button (top-right) packages everything you've reviewed
+into a `.zip`, assembled entirely in the browser:
+
+- `report.md` — a readable accessibility review: each reviewed node with its
+  screenshot and every description, plus the design's structure outline.
+- `screenshots/` — the rendered PNGs.
+- `tree.json` — the full accessibility tree.
+- `descriptions.json` — descriptions per node, structured for tooling.
+
+It covers the nodes you actually described in the session. Screenshots come from
+the Bridge plugin's exports, so the artifact is most complete with the plugin
+connected.
 
 ## Where the design data comes from
 

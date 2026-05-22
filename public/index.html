@@ -13,6 +13,9 @@
       <h1>Throughline Web</h1>
       <p class="tagline">Navigate a Figma design as an accessible structure.</p>
       <p id="bridge-status" class="status" role="status">Connecting to server…</p>
+      <button id="download-btn" class="download-btn" type="button" disabled>
+        Download session
+      </button>
     </header>
 
     <main>
@@ -108,6 +111,7 @@
 
     <div id="announcer" class="sr-only" aria-live="polite" aria-atomic="true"></div>
 
+    <script src="vendor/jszip.min.js"></script>
     <script src="app.js"></script>
   </body>
 </html>
