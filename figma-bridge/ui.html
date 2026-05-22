@@ -133,6 +133,8 @@
           }
           if (msg.type === 'focus') {
             toPlugin({ type: 'reveal', nodeId: msg.nodeId });
+          } else if (msg.type === 'export-request') {
+            toPlugin({ type: 'export', requestId: msg.requestId, nodeId: msg.nodeId });
           }
         };
         ws.onclose = function () {
@@ -161,6 +163,26 @@
           log('Canvas selected: ' + msg.name);
         } else if (msg.type === 'reveal-result') {
           log(msg.ok ? 'Revealed: ' + msg.name : 'Node not found on canvas.');
+        } else if (msg.type === 'export-result') {
+          // The sandbox exported a node to PNG bytes — convert to a data URL
+          // (FileReader handles large arrays safely) and send it on to the app.
+          if (!(ws && ws.readyState === 1)) return;
+          if (msg.ok && msg.bytes) {
+            var reader = new FileReader();
+            reader.onload = function () {
+              ws.send(
+                JSON.stringify({
+                  type: 'export-result',
+                  requestId: msg.requestId,
+                  ok: true,
+                  dataUrl: reader.result,
+                })
+              );
+            };
+            reader.readAsDataURL(new Blob([msg.bytes], { type: 'image/png' }));
+          } else {
+            ws.send(JSON.stringify({ type: 'export-result', requestId: msg.requestId, ok: false }));
+          }
         }
       };
 

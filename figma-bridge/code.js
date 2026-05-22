@@ -72,6 +72,29 @@ async function revealNode(nodeId) {
   figma.ui.postMessage({ type: 'reveal-result', ok: true, nodeId: nodeId, name: node.name });
 }
 
+// --- Export a node to a PNG ----------------------------------------------
+// The plugin is inside the open file, so this always renders the right file —
+// no Figma file key or REST API needed. Used for previews and AI descriptions.
+
+async function exportNode(requestId, nodeId) {
+  try {
+    const node = await figma.getNodeByIdAsync(nodeId);
+    if (!node || typeof node.exportAsync !== 'function') {
+      figma.ui.postMessage({ type: 'export-result', requestId: requestId, ok: false });
+      return;
+    }
+    // Cap the width so the PNG stays small enough to send over the socket and
+    // on to Claude — 1024px is crisp for a screen and well under the API limit.
+    const bytes = await node.exportAsync({
+      format: 'PNG',
+      constraint: { type: 'WIDTH', value: 1024 },
+    });
+    figma.ui.postMessage({ type: 'export-result', requestId: requestId, ok: true, bytes: bytes });
+  } catch (e) {
+    figma.ui.postMessage({ type: 'export-result', requestId: requestId, ok: false });
+  }
+}
+
 // --- Wiring --------------------------------------------------------------
 
 figma.ui.onmessage = function (msg) {
@@ -79,6 +102,8 @@ figma.ui.onmessage = function (msg) {
     figma.ui.postMessage({ type: 'document', document: snapshotDocument() });
   } else if (msg.type === 'reveal') {
     revealNode(msg.nodeId);
+  } else if (msg.type === 'export') {
+    exportNode(msg.requestId, msg.nodeId);
   }
 };
 

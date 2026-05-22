@@ -61,9 +61,9 @@
     li.dataset.name = node.name;
 
     const hasChildren = node.children && node.children.length > 0;
-    // Pages (level 1) open by default; deeper layers start collapsed, so a
-    // refresh or a new project always begins shallow — nothing is remembered.
-    const expanded = level <= 1;
+    // Everything starts collapsed — you expand pages, then layers, yourself.
+    // A refresh or a new project always begins fully collapsed.
+    const expanded = false;
     if (hasChildren) li.setAttribute('aria-expanded', String(expanded));
 
     const row = document.createElement('span');

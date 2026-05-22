@@ -5,7 +5,6 @@
 // description pitched at a screen reader user who cannot see the design.
 
 const Anthropic = require('@anthropic-ai/sdk');
-const { renderNodeImage } = require('./figma-images');
 
 const MODEL = process.env.DESCRIBE_MODEL || 'claude-opus-4-7';
 
@@ -99,33 +98,21 @@ function buildRequestText(node, mode, topic, hasImage) {
   ].join('\n');
 }
 
-async function fetchImageBase64(url) {
-  try {
-    const res = await fetch(url);
-    if (!res.ok) return null;
-    const buf = Buffer.from(await res.arrayBuffer());
-    return buf.toString('base64');
-  } catch {
-    return null;
-  }
-}
-
 // node: an accessibility-tree node ({ id, name, role, children }).
 // mode: 'overview' | 'screen' | 'element' | 'topic'. topic: color|layout|imagery.
-// apiKey: the user's Anthropic key, passed through from the request.
-async function describeNode({ node, fileKey, mode, topic, apiKey }) {
+// apiKey: the user's Anthropic key. imageBase64: a PNG screenshot or null —
+// the caller resolves it (via the Bridge plugin, else the Figma REST API).
+async function describeNode({ node, mode, topic, apiKey, imageBase64 }) {
   const anthropic = getClient(apiKey);
   if (!anthropic) return { ok: false, reason: 'no-api-key' };
 
-  const cacheKey = node.id + '|' + mode + '|' + (topic || '');
+  // Cache by image-presence too, so a structure-only result isn't reused once
+  // a screenshot becomes available (e.g. after the plugin connects).
+  const cacheKey =
+    node.id + '|' + mode + '|' + (topic || '') + '|' + (imageBase64 ? 'img' : 'noimg');
   if (cache.has(cacheKey)) {
     return { ok: true, mode, topic, description: cache.get(cacheKey), cached: true };
   }
-
-  // Try to attach a screenshot — pages and some nodes don't render, which is fine.
-  let imageBase64 = null;
-  const img = await renderNodeImage(node.id, fileKey);
-  if (img.ok) imageBase64 = await fetchImageBase64(img.url);
 
   const userContent = [];
   if (imageBase64) {

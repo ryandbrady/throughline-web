@@ -70,12 +70,65 @@ function findNode(nodes, id, depth) {
   return null;
 }
 
-// Live visual preview: render a node to a PNG via the Figma REST API.
+// --- Node images -------------------------------------------------------
+// Prefer the Bridge plugin: it exports whatever file is actually open, so the
+// image always matches and no Figma file key is involved. The REST API is the
+// fallback for snapshot mode (no plugin connected).
+
+const pendingExports = new Map(); // requestId -> { resolve, timer }
+let exportSeq = 0;
+
+function requestPluginImage(nodeId) {
+  if (countRole('plugin') === 0) return Promise.resolve(null);
+  return new Promise((resolve) => {
+    const requestId = 'exp' + ++exportSeq;
+    const timer = setTimeout(() => {
+      pendingExports.delete(requestId);
+      resolve(null);
+    }, 15000);
+    pendingExports.set(requestId, { resolve, timer });
+    broadcast('plugin', { type: 'export-request', requestId, nodeId });
+  });
+}
+
+async function getNodeImage(nodeId) {
+  const fromPlugin = await requestPluginImage(nodeId);
+  if (fromPlugin) return { ok: true, url: fromPlugin };
+  const rest = await renderNodeImage(nodeId, resolveFileKey());
+  if (rest.ok) return { ok: true, url: rest.url };
+  return { ok: false, reason: rest.reason };
+}
+
+// Resolve a node to base64 PNG data for Claude — handles both a data URL
+// (from the plugin) and an http URL (from REST).
+async function nodeImageBase64(nodeId) {
+  const image = await getNodeImage(nodeId);
+  if (!image.ok) return null;
+
+  let base64 = null;
+  if (image.url.startsWith('data:')) {
+    const comma = image.url.indexOf(',');
+    base64 = comma >= 0 ? image.url.slice(comma + 1) : null;
+  } else {
+    try {
+      const res = await fetch(image.url);
+      if (res.ok) base64 = Buffer.from(await res.arrayBuffer()).toString('base64');
+    } catch {
+      base64 = null;
+    }
+  }
+
+  // Skip an oversized image rather than risk a Claude API rejection — the
+  // description simply falls back to structure-only.
+  if (base64 && base64.length > 5000000) return null;
+  return base64;
+}
+
+// Live visual preview of the selected node.
 app.get('/api/image', async (req, res) => {
   const nodeId = req.query.nodeId;
   if (!nodeId) return res.json({ ok: false, reason: 'no-node-id' });
-  const result = await renderNodeImage(String(nodeId), resolveFileKey(), req.query.scale);
-  res.json(result);
+  res.json(await getNodeImage(String(nodeId)));
 });
 
 // AI accessibility description. The description's angle is chosen from the
@@ -99,10 +152,10 @@ app.get('/api/describe', async (req, res) => {
 
   const result = await describeNode({
     node: found.node,
-    fileKey: resolveFileKey(),
     mode,
     topic,
     apiKey: req.get('x-anthropic-key') || '',
+    imageBase64: await nodeImageBase64(nodeId),
   });
   res.json(result);
 });
@@ -114,8 +167,9 @@ app.post('/api/comment', async (req, res) => {
   res.json(result);
 });
 
-const server = http.createServer(app);
-const wss = new WebSocketServer({ server });
+// WebSocket server in noServer mode — attached to the loopback HTTP servers
+// created in listenLoopback() below.
+const wss = new WebSocketServer({ noServer: true });
 
 // Sockets are tagged 'web' or 'plugin' once they send a `hello` message.
 function countRole(role) {
@@ -166,6 +220,17 @@ wss.on('connection', (socket) => {
         broadcast('web', { type: 'selection', nodeId: msg.nodeId });
         break;
 
+      case 'export-result': {
+        // The plugin finished exporting a node image — resolve the waiter.
+        const pending = pendingExports.get(msg.requestId);
+        if (pending) {
+          clearTimeout(pending.timer);
+          pendingExports.delete(msg.requestId);
+          pending.resolve(msg.ok ? msg.dataUrl : null);
+        }
+        break;
+      }
+
       default:
         break;
     }
@@ -177,8 +242,25 @@ wss.on('connection', (socket) => {
   });
 });
 
-// Bind to loopback only — the server is not reachable from other machines on
-// the network, so the Figma token and per-request API keys stay on this host.
-server.listen(PORT, '127.0.0.1', () => {
-  console.log(`Throughline Web running at http://localhost:${PORT} (localhost only)`);
-});
+// Listen on loopback only — both IPv4 (127.0.0.1) and IPv6 (::1), so the app is
+// reachable as "localhost" however the OS resolves it, but never from other
+// machines on the network. Keeps the Figma token and API keys on this host.
+function listenLoopback(host) {
+  const server = http.createServer(app);
+  server.on('upgrade', (req, socket, head) => {
+    wss.handleUpgrade(req, socket, head, (ws) => wss.emit('connection', ws, req));
+  });
+  server.on('error', (err) => {
+    if (err.code === 'EADDRNOTAVAIL') return; // host lacks this loopback (e.g. no IPv6)
+    if (err.code === 'EADDRINUSE') {
+      console.error('Port ' + PORT + ' already in use on ' + host);
+      return;
+    }
+    throw err;
+  });
+  server.listen(PORT, host);
+}
+
+listenLoopback('127.0.0.1');
+listenLoopback('::1');
+console.log('Throughline Web running at http://localhost:' + PORT + ' (loopback only)');
