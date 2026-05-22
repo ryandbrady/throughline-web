@@ -176,6 +176,23 @@ main {
   white-space: pre-wrap;
 }
 
+/* Each generated description (primary, then any "tell me more" deep dives)
+   is its own stacked section so results accumulate rather than replace. */
+.ai-section {
+  margin-bottom: 14px;
+}
+.ai-section:last-child {
+  margin-bottom: 0;
+}
+.ai-section-label {
+  margin: 0 0 3px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+}
+
 .ai-actions {
   margin: 12px 0;
 }

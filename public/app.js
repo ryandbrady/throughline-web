@@ -32,9 +32,13 @@
   let bridgeConnected = false;
   let currentSource = 'mock'; // 'mock' | 'figma'
   let currentTitle = '';
-  let describeToken = 0; // guards against a stale AI response overwriting a newer
   let pendingDescribe = null; // a describe request waiting on an API key
   let ws = null;
+
+  // Generated descriptions, cached per node — so they are not re-fetched, and
+  // so every "tell me more" result accumulates instead of replacing the last.
+  const descriptions = new Map(); // nodeId -> [{ kind, label, text }]
+  const describeInFlight = new Set(); // `${nodeId}|${kind}` currently generating
 
   const KEY_STORAGE = 'throughline.anthropicKey';
   const getStoredKey = () => localStorage.getItem(KEY_STORAGE) || '';
@@ -112,6 +116,9 @@
   function renderTree(tree) {
     currentSource = tree.source;
     currentTitle = tree.title;
+    // A new design means new node IDs — cached descriptions no longer apply.
+    descriptions.clear();
+    describeInFlight.clear();
     treeEl.innerHTML = '';
     if (!tree.pages.length) {
       treeEl.innerHTML = '<p class="loading">This design has no visible pages.</p>';
@@ -261,6 +268,15 @@
   // reader user has no visual reference for layout). Deeper nodes wait for an
   // explicit "Describe with AI" press.
 
+  const SECTION_LABELS = {
+    overview: 'Page overview',
+    screen: 'Screen',
+    element: 'Element',
+    color: 'Color & contrast',
+    layout: 'Layout & hierarchy',
+    imagery: 'Imagery & icons',
+  };
+
   function setAiMessage(text, isError) {
     aiDescEl.innerHTML = '';
     const p = document.createElement('p');
@@ -269,14 +285,39 @@
     aiDescEl.append(p);
   }
 
-  // Called on every focus change — show the describe affordance, don't call AI.
+  // Render every cached description for a node, stacked in generation order.
+  function renderDescriptions(nodeId) {
+    aiDescEl.innerHTML = '';
+    const list = descriptions.get(nodeId) || [];
+    list.forEach((entry) => {
+      const section = document.createElement('div');
+      section.className = 'ai-section';
+      const label = document.createElement('p');
+      label.className = 'ai-section-label';
+      label.textContent = entry.label;
+      const text = document.createElement('p');
+      text.className = 'ai-text';
+      text.textContent = entry.text;
+      section.append(label, text);
+      aiDescEl.append(section);
+    });
+  }
+
+  // Called on every focus change — show this node's cached descriptions if it
+  // has any, otherwise the describe affordance. Never calls the AI.
   function resetAiPanel(li) {
-    describeToken += 1; // cancel any in-flight description
-    aiActionsEl.hidden = true;
     aiKeyForm.hidden = true;
-    describeBtn.hidden = false;
-    describeBtn.textContent = 'Describe “' + li.dataset.name + '” with AI';
-    setAiMessage('Press Describe — or Enter on a page or screen — for an AI description.');
+    const list = descriptions.get(li.dataset.nodeId);
+    if (list && list.length) {
+      renderDescriptions(li.dataset.nodeId);
+      describeBtn.hidden = true;
+      aiActionsEl.hidden = false;
+    } else {
+      describeBtn.hidden = false;
+      describeBtn.textContent = 'Describe “' + li.dataset.name + '” with AI';
+      aiActionsEl.hidden = true;
+      setAiMessage('Press Describe — or Enter on a page or screen — for an AI description.');
+    }
   }
 
   function describeErrorText(reason) {
@@ -324,41 +365,86 @@
 
   aiKeyEdit.addEventListener('click', () => showKeyForm(false));
 
+  // Append an error line below whatever is already shown for the node.
+  function appendAiError(nodeId, text) {
+    renderDescriptions(nodeId);
+    const err = document.createElement('p');
+    err.className = 'ai-msg error';
+    err.textContent = text;
+    aiDescEl.append(err);
+  }
+
   function loadDescription(nodeId, name, topic) {
+    const kind = topic || 'primary';
+    const list = descriptions.get(nodeId) || [];
+    const cached = list.find((e) => e.kind === kind);
+    if (cached) {
+      // Already generated — show it from the cache, no Claude call.
+      renderDescriptions(nodeId);
+      aiActionsEl.hidden = false;
+      announce(cached.label + ' for ' + name + '. ' + cached.text);
+      return;
+    }
+
     const key = getStoredKey();
     if (!key) {
       pendingDescribe = { nodeId: nodeId, name: name, topic: topic };
       showKeyForm(false);
       return;
     }
-    const token = ++describeToken;
+
+    const flightKey = nodeId + '|' + kind;
+    if (describeInFlight.has(flightKey)) return; // already generating this one
+    describeInFlight.add(flightKey);
+
     describeBtn.hidden = true;
     aiKeyForm.hidden = true;
-    setAiMessage(topic ? 'Looking at ' + topic + '…' : 'Describing “' + name + '”…');
+    // Keep any existing descriptions on screen; add a pending line below them.
+    renderDescriptions(nodeId);
+    const pending = document.createElement('p');
+    pending.className = 'ai-msg';
+    pending.textContent = topic
+      ? 'Generating ' + (SECTION_LABELS[topic] || topic) + '…'
+      : 'Describing “' + name + '”…';
+    aiDescEl.append(pending);
+
     const url = '/api/describe?nodeId=' + encodeURIComponent(nodeId) + (topic ? '&topic=' + topic : '');
     fetch(url, { headers: { 'X-Anthropic-Key': key } })
       .then((r) => r.json())
       .then((res) => {
-        if (token !== describeToken) return; // a newer selection has taken over
+        describeInFlight.delete(flightKey);
+        const onNode = currentItem && currentItem.dataset.nodeId === nodeId;
         if (res.ok) {
-          aiDescEl.innerHTML = '';
-          const p = document.createElement('p');
-          p.className = 'ai-text';
-          p.textContent = res.description;
-          aiDescEl.append(p);
-          aiActionsEl.hidden = false;
-          announce('AI description of ' + name + '. ' + res.description);
+          // Cache the result (accumulating), then re-render if still on the node.
+          const target = descriptions.get(nodeId) || [];
+          if (!descriptions.has(nodeId)) descriptions.set(nodeId, target);
+          const entry = {
+            kind: kind,
+            label: SECTION_LABELS[topic || res.mode] || 'Description',
+            text: res.description,
+          };
+          const idx = target.findIndex((e) => e.kind === kind);
+          if (idx >= 0) target[idx] = entry;
+          else target.push(entry);
+          if (onNode) {
+            renderDescriptions(nodeId);
+            aiActionsEl.hidden = false;
+          }
+          announce(entry.label + ' for ' + name + '. ' + res.description);
         } else if (res.reason === 'no-api-key' || res.reason === 'bad-api-key') {
           if (res.reason === 'bad-api-key') localStorage.removeItem(KEY_STORAGE);
           pendingDescribe = { nodeId: nodeId, name: name, topic: topic };
           updateKeyEditVisibility();
-          showKeyForm(res.reason === 'bad-api-key');
-        } else {
-          setAiMessage(describeErrorText(res.reason), true);
+          if (onNode) showKeyForm(res.reason === 'bad-api-key');
+        } else if (onNode) {
+          appendAiError(nodeId, describeErrorText(res.reason));
         }
       })
       .catch(() => {
-        if (token === describeToken) setAiMessage('Could not reach the server.', true);
+        describeInFlight.delete(flightKey);
+        if (currentItem && currentItem.dataset.nodeId === nodeId) {
+          appendAiError(nodeId, 'Could not reach the server.');
+        }
       });
   }
 
