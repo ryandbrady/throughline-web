@@ -16,11 +16,6 @@ more. Each is a surface that today quietly assumes you can see it. The
 architecture below is deliberately source-agnostic: one accessibility-tree model
 fed by pluggable platform adapters.
 
-This is a **separate product** from the Throughline Figma plugin in
-`../throughline/`. The plugin helps *designers* audit accessibility inside
-Figma. Throughline Web makes *the design itself* navigable by a screen reader
-user, from an accessible space outside Figma's canvas UI.
-
 ## What this first pass does
 
 - **Reads a design** into a page → layer accessibility tree, assigning each
