@@ -35,26 +35,80 @@ user, from an accessible space outside Figma's canvas UI.
 - `figma-bridge/` — a companion Figma plugin. Its sandbox walks the document and
   drives canvas selection; its UI iframe owns the WebSocket.
 
-## Run it
+## Prerequisites
 
-```bash
-npm install
-npm start            # http://localhost:4400
-```
+- **Node.js 18 or newer** — check with `node --version`. (The server relies on
+  built-in `fetch`, `node --watch`, and `WebSocketServer`.)
+- **Git** — to clone the repo.
+- **Figma desktop app** — only needed for the optional live canvas sync (step 6).
 
-Open `http://localhost:4400`. If `server/real-design.js` exists it loads that
-real Figma file; otherwise it falls back to the bundled **mock design**. Either
-way the keyboard navigation works with no Figma running. (Set `PORT` to use a
-different port: `PORT=5000 npm start`.)
+No API keys, accounts, or `.env` file are required.
 
-For **live canvas sync**:
+## Run it — step by step
 
-1. In the Figma desktop app: *Plugins → Development → Import plugin from
-   manifest…* and pick `figma-bridge/manifest.json`.
-2. Run the **Throughline Web Bridge** plugin in any file. It connects to
-   `ws://localhost:4400` and pushes that file's structure to the web app.
-3. The web app status flips to **Live**. Press Enter on any item to reveal it
-   on the canvas; select layers on the canvas to move the web tree.
+Each teammate runs their own copy locally; the server is localhost-only.
+
+1. **Clone the repo**
+
+   ```bash
+   git clone https://github.com/ryandbrady/throughline-web.git
+   cd throughline-web
+   ```
+
+2. **Install dependencies**
+
+   ```bash
+   npm install
+   ```
+
+3. **Start the server**
+
+   ```bash
+   npm start
+   ```
+
+   You should see `Throughline Web running at http://localhost:4400`.
+   If port 4400 is taken, run `PORT=5000 npm start` and use that port below.
+
+4. **Open the app** — visit **http://localhost:4400** in a browser.
+
+   It loads the bundled **mock design** immediately, so keyboard navigation
+   works with no Figma running. (If you have generated `server/real-design.js`
+   locally, it loads that real file instead.)
+
+5. **Stop the server** when finished — press `Ctrl+C` in the terminal.
+
+### Keyboard controls
+
+| Key | Action |
+| --- | --- |
+| ↑ / ↓ | Move between items |
+| → | Expand a group, or step into it |
+| ← | Collapse a group, or jump to its parent |
+| Home / End | First / last item |
+| Enter or Space | Reveal the selected item on the Figma canvas |
+| Tab | Move between the tree, the inspector, and the Reveal button |
+
+The tree is a WAI-ARIA `tree` widget with live-region announcements — test it
+with a screen reader (VoiceOver: `Cmd+F5`).
+
+## Optional: live canvas sync with Figma — step by step
+
+This makes the web app and the Figma canvas drive each other.
+
+6. Keep the server running (`npm start` from step 3).
+7. Open the **Figma desktop app**, then open any design file.
+8. **Import the Bridge plugin** — *Plugins → Development → Import plugin from
+   manifest…* and choose `figma-bridge/manifest.json` from your clone.
+9. **Run it** — *Plugins → Development → Throughline Web Bridge*.
+10. The plugin connects to `ws://localhost:4400` and pushes that file's
+    structure. The web app's status flips to **Live** and shows the real file.
+11. Try it: arrow-key to an item in the web app and press **Enter** — Figma
+    selects and zooms to it. Select a layer **on the canvas** — the web tree
+    moves to match.
+
+If the plugin cannot connect, confirm `npm start` is running and that the
+server address in the plugin's UI field matches your port.
 
 ## Where the design data comes from
 
