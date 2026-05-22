@@ -121,6 +121,12 @@ through it. There are three sources:
 3. **Bridge plugin** — live data pushed over the WebSocket; also drives the
    canvas. The only source that supports two-way sync.
 
+**For teams:** a fresh clone has no `server/real-design.js` (it is git-ignored),
+so it runs on the **mock design**. To navigate a *real* file, use the **Bridge
+plugin** (steps 6–11 above) — it works for anyone with the Figma desktop app and
+needs no MCP access. The MCP importer below is only for whoever has Figma MCP
+access set up.
+
 ### Import a real file via the Figma MCP
 
 The Figma **MCP** is a local, Claude-side dev tool — a deployed web app can't
