@@ -477,6 +477,11 @@
   });
 
   // Clicking a row selects it; clicking the twisty toggles expansion.
+  // Double-clicking a row activates it.
+  let lastClickTime = 0;
+  let lastClickTarget = null;
+  const doubleClickThreshold = 300;
+
   treeEl.addEventListener('click', (event) => {
     const li = event.target.closest('li[role="treeitem"]');
     if (!li) return;
@@ -484,7 +489,28 @@
       setExpanded(li, li.getAttribute('aria-expanded') !== 'true');
       return;
     }
-    focusItem(li);
+
+    const now = Date.now();
+    const isDoubleClick = lastClickTarget === li && now - lastClickTime < doubleClickThreshold;
+    lastClickTime = now;
+    lastClickTarget = li;
+
+    if (isDoubleClick) {
+      activate(li);
+    } else {
+      focusItem(li);
+    }
+  });
+
+  // Add visual hints for double-click capability
+  treeEl.addEventListener('mouseover', (event) => {
+    const row = event.target.closest('.row');
+    if (row && row.parentElement.tagName === 'LI') {
+      row.style.cursor = 'pointer';
+      if (!row.hasAttribute('title')) {
+        row.setAttribute('title', 'Double-click to activate');
+      }
+    }
   });
 
   // Skip-link / programmatic focus on the container redirects to an item.

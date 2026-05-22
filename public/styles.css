@@ -333,6 +333,7 @@ li[role="treeitem"] {
 .row:hover {
   background: var(--bg-row-hover);
 }
+li[role="treeitem"] > .row:focus,
 li[role="treeitem"] > .row:focus-visible,
 .tree:focus-visible {
   outline: 3px solid var(--focus);
